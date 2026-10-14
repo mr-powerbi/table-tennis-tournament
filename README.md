@@ -6,7 +6,7 @@ Aplikacja do prowadzenia firmowego turnieju ping-ponga: zapisy po linku, dwie ru
 
 ![Podium i drabinka](docs/screenshots/podium-desktop.png)
 
-> **Vibecoded.** Aplikacja powstała w jeden wieczór, w rozmowie z AI (Claude), z potrzeby chwili: na firmowe spotkanie integracyjne, na którym do turnieju, rozgrywanego dla zabawy, zgłosiło się blisko 30 osób. Wszystko powstało na szybko z promptów, w rozmowie z czatem. Większość poleceń dyktowałem głosowo z telefonu, a część funkcji dopisywaliśmy już w trakcie rozgrywek. Poniżej opisuję, jak to przebiegało.
+> **Vibecoded.** Pierwsza działająca wersja powstała w około 20 minut od pierwszego prompta, w rozmowie z AI (Claude), a potem dostała kilka szybkich iteracji poprawek. Wszystko z potrzeby chwili: na firmowe spotkanie integracyjne, na którym do turnieju, rozgrywanego dla zabawy, zgłosiło się blisko 30 osób. Bez projektu i specyfikacji, na szybko, z promptów w rozmowie z czatem. Większość poleceń dyktowałem głosowo z telefonu, a część funkcji dopisywaliśmy już w trakcie rozgrywek. Poniżej opisuję, jak to przebiegało.
 
 ---
 
@@ -43,7 +43,7 @@ Przy nieparzystej liczbie graczy osoba bez pary dostaje mecz uzupełniający z l
 
 ## Jak to powstało
 
-### Oś czasu (12 października 2026, wieczór)
+### Oś czasu (12 października 2026, według logów rozmowy)
 
 | Godzina | Co się działo |
 |---|---|
@@ -56,9 +56,9 @@ Przy nieparzystej liczbie graczy osoba bez pary dostaje mecz uzupełniający z l
 | 21:10 | Informacja, kto ma już pewny awans i ma nie wychodzić z sali. |
 | 21:20–21:36 | Przebudowa zasad Lucky Losers w trakcie rundy 2, bez utraty wpisanych wyników. |
 | 21:51–21:53 | Rozstawienie drabinki 1 vs ostatni, tabela wszystkich wyników i tabela ogólna z miejscami. |
-| 22:32 | Statystyki turnieju na koniec wieczoru. |
+| 22:32 | Statystyki turnieju na koniec. |
 
-Łącznie około 2,5 godziny, z czego większość równolegle z trwającym turniejem.
+**W skrócie: około 20 minut do pierwszej wersji online, potem kilka iteracji poprawek**, głównie już w trakcie turnieju, gdy było widać, czego brakuje.
 
 ### Proces
 - **Rozmowa zamiast specyfikacji.** Nie było projektu ani backlogu. Wymagania pojawiały się w kolejnych, często dyktowanych wiadomościach i zmieniały się w miarę, jak było widać, jak turniej idzie na sali.
@@ -118,7 +118,7 @@ W repozytorium nie ma prawdziwych imion, nazwy firmy ani adresu, pod którym dzi
 
 ## English summary
 
-A small web app for running an office table-tennis tournament: sign-ups via a shared link, two qualifying rounds (everyone plays at least twice), a Lucky Losers round, a seeded knockout bracket, a podium, an overall table and stats. It was **vibecoded with Claude in a single evening** for a company team-building event where close to 30 people signed up to play for fun, with the first version live about 20 minutes after the first prompt and many features added while the tournament was being played. The backend is a single stdlib-only Python file storing state in JSON. The GitHub Pages demo runs a 1:1 JavaScript port of the same logic in the browser.
+A small web app for running an office table-tennis tournament: sign-ups via a shared link, two qualifying rounds (everyone plays at least twice), a Lucky Losers round, a seeded knockout bracket, a podium, an overall table and stats. It was **vibecoded with Claude** for a company team-building event where close to 30 people signed up to play for fun: **the first version was live about 20 minutes after the first prompt**, followed by a few quick iterations of fixes, mostly while the tournament was being played. The backend is a single stdlib-only Python file storing state in JSON. The GitHub Pages demo runs a 1:1 JavaScript port of the same logic in the browser.
 
 ## Licencja
 
