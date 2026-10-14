@@ -2,7 +2,7 @@
 
 Aplikacja do prowadzenia firmowego turnieju ping-ponga: zapisy po linku, dwie rundy kwalifikacji, Lucky Losers, drabinka pucharowa, podium z laurami, tabela ogólna i statystyki.
 
-**[▶ Otwórz demo](https://mr-powerbi.github.io/table-tennis--tournament/)**: działa w przeglądarce, jesteś organizatorem i możesz rozegrać cały turniej od zapisów do podium.
+**[▶ Otwórz demo](https://mr-powerbi.github.io/table-tennis-tournament/)**: działa w przeglądarce, jesteś organizatorem i możesz rozegrać cały turniej od zapisów do podium.
 
 ![Podium i drabinka](docs/screenshots/podium-desktop.png)
 
