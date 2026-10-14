@@ -2,7 +2,7 @@
 
 A web app for running an office table-tennis tournament: sign-ups via a shared link, two qualifying rounds, a Lucky Losers round, a seeded knockout bracket, a podium with laurels, an overall table and stats.
 
-**[▶ Open the demo](https://mr-powerbi.github.io/table-tennis-tournament/)**: it runs in your browser, you are the organizer and you can play a whole tournament from sign-ups to the podium.
+**[▶ Open the demo](https://mr-powerbi-data.pl/table-tennis-tournament/)**: it runs in your browser, you are the organizer and you can play a whole tournament from sign-ups to the podium.
 
 ![Podium and bracket](docs/screenshots/podium-desktop.png)
 
@@ -89,7 +89,7 @@ tests/           full-tournament simulations for both engines
 
 - **Server mode** (how it ran at the event): `server.py` keeps the state in a single JSON file and exposes a small API (`api/state`, `api/join`, `api/score`, `api/admin`). Organizer rights come from a token in the `#admin-…` part of the link, which never reaches server logs or the Referer header.
 - **Demo mode** (GitHub Pages): the same interface, but instead of the server it uses `engine.js`, a 1:1 port of the logic in `server.py`. The state is stored in the browser's `localStorage`.
-- The interface picks the mode by itself: on `github.io`, from a local file or with `?demo` it runs the demo, otherwise it connects to the server.
+- The interface picks the mode by itself: on `github.io`, from a local file or with `?demo` it runs the demo. Otherwise it connects to the server, and if no server API answers (e.g. GitHub Pages on a custom domain), it falls back to the demo.
 
 ## Running it yourself
 
