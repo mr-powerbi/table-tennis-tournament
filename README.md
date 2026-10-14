@@ -6,7 +6,7 @@ Aplikacja do prowadzenia firmowego turnieju ping-ponga: zapisy po linku, dwie ru
 
 ![Podium i drabinka](docs/screenshots/podium-desktop.png)
 
-> **Vibecoded.** Aplikacja powstała w jeden wieczór, w rozmowie z AI (Claude), na potrzeby doraźnego zorganizowania turnieju firmowego na wyjeździe integracyjnym (blisko 40 osób, w turnieju zagrało 26). Większość poleceń dyktowałem głosowo z telefonu, a część funkcji dopisywaliśmy już w trakcie rozgrywek. Poniżej opisuję, jak to przebiegało.
+> **Vibecoded.** Aplikacja powstała w jeden wieczór, w rozmowie z AI (Claude), z potrzeby chwili: na firmowe spotkanie integracyjne, na którym do turnieju, rozgrywanego dla zabawy, zgłosiło się blisko 30 osób. Wszystko powstało na szybko z promptów, w rozmowie z czatem. Większość poleceń dyktowałem głosowo z telefonu, a część funkcji dopisywaliśmy już w trakcie rozgrywek. Poniżej opisuję, jak to przebiegało.
 
 ---
 
@@ -51,14 +51,14 @@ Przy nieparzystej liczbie graczy osoba bez pary dostaje mecz uzupełniający z l
 | 20:04–20:07 | Zmiana koncepcji w locie: bez fazy grupowej, każdy gra dwa mecze, przegrani dostają drugą szansę. Do tego zrzut strony firmy jako inspiracja kolorów i decyzja, że strona stanie na moim serwerze pod adresem znanym tylko uczestnikom. |
 | 20:07–20:20 | Kolejne wymagania: link pójdzie na firmowego WhatsAppa, każdy dopisuje się sam, na koniec podium z laurami, wyniki wpisuje tylko organizator. |
 | **~20:24** | **Pierwsza działająca wersja online**, około 20 minut od pierwszego polecenia. |
-| 20:25–20:33 | Ikona i podgląd linku, dopisywanie kilku osób z jednego telefonu. Przejście na mecze do jednego seta z wpisywaniem punktów („popraw szybko, bo zaczynamy”). |
+| 20:25–20:33 | Ikona i podgląd linku, dopisywanie kilku osób z jednego telefonu. Wpisywanie wyników punktami („popraw szybko, bo zaczynamy”). |
 | 20:47 | Turniej trwa, przychodzą spóźnieni, więc dochodzi funkcja dopisywania w trakcie rund. |
 | 21:10 | Informacja, kto ma już pewny awans i ma nie wychodzić z sali. |
 | 21:20–21:36 | Przebudowa zasad Lucky Losers w trakcie rundy 2, bez utraty wpisanych wyników. |
 | 21:51–21:53 | Rozstawienie drabinki 1 vs ostatni, tabela wszystkich wyników i tabela ogólna z miejscami. |
 | 22:32 | Statystyki turnieju na koniec wieczoru. |
 
-Łącznie około 2,5 godziny, z czego większość równolegle z trwającym turniejem: 26 graczy, 47 meczów.
+Łącznie około 2,5 godziny, z czego większość równolegle z trwającym turniejem.
 
 ### Proces
 - **Rozmowa zamiast specyfikacji.** Nie było projektu ani backlogu. Wymagania pojawiały się w kolejnych, często dyktowanych wiadomościach i zmieniały się w miarę, jak było widać, jak turniej idzie na sali.
@@ -68,7 +68,7 @@ Przy nieparzystej liczbie graczy osoba bez pary dostaje mecz uzupełniający z l
 
 ### Czego się nauczyłem
 - Przy doraźnych narzędziach najważniejszy jest czas do pierwszej działającej wersji. Resztę i tak dopisuje się dopiero, gdy ludzie zaczną z niej korzystać.
-- Zasady turnieju to najtrudniejsza część. Kod do nich dostosować łatwo, gorzej z ustaleniem, czego się właściwie chce, gdy na sali czeka 26 osób.
+- Zasady turnieju to najtrudniejsza część. Kod do nich dostosować łatwo, gorzej z ustaleniem, czego się właściwie chce, gdy na sali czekają gracze.
 - Testy symulacyjne (pełny turniej z losowymi wynikami dla 3–40 graczy) dawały pewność przy zmianach na żywo.
 
 ---
@@ -118,7 +118,7 @@ W repozytorium nie ma prawdziwych imion, nazwy firmy ani adresu, pod którym dzi
 
 ## English summary
 
-A small web app for running an office table-tennis tournament: sign-ups via a shared link, two qualifying rounds (everyone plays at least twice), a Lucky Losers round, a seeded knockout bracket, a podium, an overall table and stats. It was **vibecoded with Claude in a single evening** for a company trip (26 players, 47 matches), with the first version live about 20 minutes after the first prompt and many features added while the tournament was being played. The backend is a single stdlib-only Python file storing state in JSON. The GitHub Pages demo runs a 1:1 JavaScript port of the same logic in the browser.
+A small web app for running an office table-tennis tournament: sign-ups via a shared link, two qualifying rounds (everyone plays at least twice), a Lucky Losers round, a seeded knockout bracket, a podium, an overall table and stats. It was **vibecoded with Claude in a single evening** for a company team-building event where close to 30 people signed up to play for fun, with the first version live about 20 minutes after the first prompt and many features added while the tournament was being played. The backend is a single stdlib-only Python file storing state in JSON. The GitHub Pages demo runs a 1:1 JavaScript port of the same logic in the browser.
 
 ## Licencja
 
