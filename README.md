@@ -1,95 +1,97 @@
-# 🏓 Turniej Tenisa Stołowego
+# 🏓 Table Tennis Tournament
 
-Aplikacja do prowadzenia firmowego turnieju ping-ponga: zapisy po linku, dwie rundy kwalifikacji, Lucky Losers, drabinka pucharowa, podium z laurami, tabela ogólna i statystyki.
+A web app for running an office table-tennis tournament: sign-ups via a shared link, two qualifying rounds, a Lucky Losers round, a seeded knockout bracket, a podium with laurels, an overall table and stats.
 
-**[▶ Otwórz demo](https://mr-powerbi.github.io/table-tennis-tournament/)**: działa w przeglądarce, jesteś organizatorem i możesz rozegrać cały turniej od zapisów do podium.
+**[▶ Open the demo](https://mr-powerbi.github.io/table-tennis-tournament/)**: it runs in your browser, you are the organizer and you can play a whole tournament from sign-ups to the podium.
 
-![Podium i drabinka](docs/screenshots/podium-desktop.png)
+![Podium and bracket](docs/screenshots/podium-desktop.png)
 
-> **Vibecoded.** Pierwsza działająca wersja powstała w około 20 minut od pierwszego prompta, w rozmowie z AI (Claude), a potem dostała kilka szybkich iteracji poprawek. Wszystko z potrzeby chwili: na firmowe spotkanie integracyjne, na którym do turnieju, rozgrywanego dla zabawy, zgłosiło się blisko 30 osób. Bez projektu i specyfikacji, na szybko, z promptów w rozmowie z czatem. Większość poleceń dyktowałem głosowo z telefonu, a część funkcji dopisywaliśmy już w trakcie rozgrywek. Poniżej opisuję, jak to przebiegało.
+> **Vibecoded.** The first working version was live about 20 minutes after the first prompt, built in a conversation with AI (Claude), and then went through a few quick iterations of fixes. It was made on the spot for a company team-building event, where close to 30 people signed up for a just-for-fun tournament. There was no design and no spec, only prompts in a chat. I dictated most of them by voice from my phone, and some features were added while the games were already being played. The process is described below.
+
+The app's interface is in Polish, because that's who it was built for. The documentation and code structure are described here in English.
 
 ---
 
-## Co potrafi
+## Features
 
-**Dla uczestników (zwykły link)**
-- Dopisanie siebie albo kilku osób z jednego telefonu. Swoje wpisy można wycofać do czasu losowania.
-- Podgląd na żywo: strona odświeża się sama co kilka sekund.
-- Widok bieżącego etapu, rankingu, drabinki, podium, tabeli ogólnej, wszystkich wyników i statystyk.
-- Wyróżnienie meczów osób dopisanych z danego telefonu.
+**For participants (regular link)**
+- Sign yourself up, or several people from one phone. Your own entries can be withdrawn until the draw.
+- Live view: the page refreshes itself every few seconds.
+- Current stage, ranking, bracket, podium, overall table, all results and stats.
+- Matches of the people signed up from your phone are highlighted.
 
-**Dla organizatora (link z tajnym tokenem)**
-- Wpisywanie wyników punktami (np. 11:7, 12:10) z walidacją zasad: do 11, dwa punkty przewagi.
-- Losowanie ręczne albo automatyczne o ustalonej godzinie.
-- Dopisywanie spóźnionych graczy w trakcie rund 1 i 2, tak żeby i tak zagrali dwa mecze.
-- Cofanie turnieju do wcześniejszego etapu bez utraty wcześniejszych wyników.
-- Ustawienia: nazwa, edycja, nagroda, format meczu (1–3 sety), rozmiar drabinki, liczba miejsc dla Lucky Losers.
+**For the organizer (link with a secret token)**
+- Score entry in points (e.g. 11:7, 12:10), validated against the rules: first to 11, win by two.
+- Manual draw, or an automatic draw at a set time.
+- Adding late players during rounds 1 and 2, so they still get their two matches.
+- Rolling the tournament back to an earlier stage without losing earlier results.
+- Settings: name, edition, prize, match format (1–3 sets), bracket size, number of Lucky Losers spots.
 
-**Format turnieju**
-1. **Runda 1.** Losowe pary, każdy gra jeden mecz.
-2. **Runda 2.** Wygrani grają z wygranymi, przegrani z przegranymi. Po tej rundzie każdy ma za sobą co najmniej dwa mecze.
-3. **Ranking.** Zwycięstwa, potem bilans punktów, potem zdobyte punkty.
-4. **Awans bezpośredni** dla czołówki rankingu. Już w trakcie rundy 2 strona pokazuje, kto ma pewny awans i może zostać na sali.
-5. **Lucky Losers.** Najlepsi spoza bezpośredniego awansu grają jeden mecz (lepszy z rankingu ze słabszym), a zwycięzcy uzupełniają drabinkę.
-6. **Drabinka.** Rozstawienie 1. z ostatnim, 2. z przedostatnim i tak dalej, mecz o 3. miejsce i podium.
+**Tournament format**
+1. **Round 1.** Random pairs, everyone plays one match.
+2. **Round 2.** Winners play winners, losers play losers. After this round everyone has played at least twice.
+3. **Ranking.** Wins, then point difference, then points scored.
+4. **Direct qualification** for the top of the ranking. Already during round 2 the page shows who is guaranteed a place and should stay around.
+5. **Lucky Losers.** The best players outside direct qualification play one match (higher-ranked vs lower-ranked), and the winners fill the remaining bracket spots.
+6. **Bracket.** Seeded 1st vs last, 2nd vs second-to-last and so on, plus a third-place match and the podium.
 
-Przy nieparzystej liczbie graczy osoba bez pary dostaje mecz uzupełniający z losowym rywalem, który liczy się tylko dla niej.
+With an odd number of players, the player without a pair gets an extra match against a random opponent that only counts for them.
 
-| Runda 2 na telefonie (ciemny motyw) | Wpisywanie wyniku |
+| Round 2 on a phone (dark mode) | Entering a score |
 |---|---|
-| ![Runda 2 z listą pewnego awansu](docs/screenshots/round2-mobile-dark.png) | ![Okno wyniku seta](docs/screenshots/score-dialog-mobile.png) |
+| ![Round 2 with the list of guaranteed qualifiers](docs/screenshots/round2-mobile-dark.png) | ![Score dialog](docs/screenshots/score-dialog-mobile.png) |
 
 ---
 
-## Jak to powstało
+## How it was built
 
-### Oś czasu (12 października 2026, według logów rozmowy)
+### Timeline (12 October 2026, from the chat log)
 
-| Godzina | Co się działo |
+| Time | What happened |
 |---|---|
-| 20:03 | Pierwsze polecenie: drabinka i grupy, liczba graczy i grup ustawiana w aplikacji, kolory firmy. |
-| 20:04–20:07 | Zmiana koncepcji w locie: bez fazy grupowej, każdy gra dwa mecze, przegrani dostają drugą szansę. Do tego zrzut strony firmy jako inspiracja kolorów i decyzja, że strona stanie na moim serwerze pod adresem znanym tylko uczestnikom. |
-| 20:07–20:20 | Kolejne wymagania: link pójdzie na firmowego WhatsAppa, każdy dopisuje się sam, na koniec podium z laurami, wyniki wpisuje tylko organizator. |
-| **~20:24** | **Pierwsza działająca wersja online**, około 20 minut od pierwszego polecenia. |
-| 20:25–20:33 | Ikona i podgląd linku, dopisywanie kilku osób z jednego telefonu. Wpisywanie wyników punktami („popraw szybko, bo zaczynamy”). |
-| 20:47 | Turniej trwa, przychodzą spóźnieni, więc dochodzi funkcja dopisywania w trakcie rund. |
-| 21:10 | Informacja, kto ma już pewny awans i ma nie wychodzić z sali. |
-| 21:20–21:36 | Przebudowa zasad Lucky Losers w trakcie rundy 2, bez utraty wpisanych wyników. |
-| 21:51–21:53 | Rozstawienie drabinki 1 vs ostatni, tabela wszystkich wyników i tabela ogólna z miejscami. |
-| 22:32 | Statystyki turnieju na koniec. |
+| 20:03 | First prompt: bracket and groups, number of players and groups set in the app, brand colours. |
+| 20:04–20:07 | Concept changed on the fly: no group stage, everyone plays two matches, losers get a second chance. A screenshot of a website as colour reference, and the decision to host the page on my own server under an address known only to participants. |
+| 20:07–20:20 | More requirements: everyone signs up on their own, a podium with laurels at the end, only the organizer enters results. |
+| **~20:24** | **First working version online**, about 20 minutes after the first prompt. |
+| 20:25–20:33 | Hotfixes to keep the production version fully working and ready to share with participants: link preview and icon, several sign-ups from one phone, score entry in points. |
+| 20:47 | The tournament is running and late players arrive, so adding players mid-round is added. |
+| 21:10 | A list of players who are already guaranteed a bracket spot and should not leave. |
+| 21:20–21:36 | Lucky Losers rules reworked during round 2, without losing any entered results. |
+| 21:51–21:53 | Bracket seeding 1st vs last, a table of all results and an overall standings table. |
+| 22:32 | Tournament stats at the end. |
 
-**W skrócie: około 20 minut do pierwszej wersji online, potem kilka iteracji poprawek**, głównie już w trakcie turnieju, gdy było widać, czego brakuje.
+**In short: about 20 minutes to the first version online, then a few iterations of fixes**, mostly during the tournament, once it was clear what was missing.
 
-### Proces
-- **Rozmowa zamiast specyfikacji.** Nie było projektu ani backlogu. Wymagania pojawiały się w kolejnych, często dyktowanych wiadomościach i zmieniały się w miarę, jak było widać, jak turniej idzie na sali.
-- **AI pisało kod, ja decydowałem o zasadach.** Przy każdej zmianie formatu (Lucky Losers, rozstawienie, uprawnienia) decyzja była moja, a implementacja, wdrożenie i testy po stronie AI.
-- **Zmiany na produkcji w trakcie zawodów.** Przed każdą poprawką robiona była kopia stanu turnieju. Nowa logika była najpierw sprawdzana symulacją pełnego turnieju na kopii prawdziwych danych, a dopiero potem wdrażana. Żaden wpisany wynik nie zginął.
-- **Prostota z wyboru.** Brak frameworków, bazy danych i kroku budowania. Jeden plik HTML, jeden plik Pythona i jeden plik JSON ze stanem. Przy kilkudziesięciu osobach i jednym organizatorze to w zupełności wystarcza.
+### Process
+- **A conversation instead of a spec.** There was no design and no backlog. Requirements came in consecutive, often dictated messages and changed as we saw how the tournament was going.
+- **AI wrote the code, I decided the rules.** For every change to the format (Lucky Losers, seeding, permissions) the decision was mine, and the implementation, deployment and testing were done by the AI.
+- **Production changes during the event.** Before every fix the tournament state was backed up. New logic was first checked by simulating a full tournament on a copy of the real data and only then deployed. No entered result was lost.
+- **Simple on purpose.** No frameworks, no database, no build step. One HTML file, one Python file and one JSON file with the state. For a few dozen people and one organizer that is plenty.
 
-### Czego się nauczyłem
-- Przy doraźnych narzędziach najważniejszy jest czas do pierwszej działającej wersji. Resztę i tak dopisuje się dopiero, gdy ludzie zaczną z niej korzystać.
-- Zasady turnieju to najtrudniejsza część. Kod do nich dostosować łatwo, gorzej z ustaleniem, czego się właściwie chce, gdy na sali czekają gracze.
-- Testy symulacyjne (pełny turniej z losowymi wynikami dla 3–40 graczy) dawały pewność przy zmianach na żywo.
+### What I learned
+- For ad-hoc tools, time to the first working version matters most. Everything else gets added once people start using it.
+- The tournament rules are the hardest part. Adapting the code is easy, deciding what you actually want while players are waiting is not.
+- Simulation tests (a full tournament with random results for 3–40 players) gave confidence when changing things live.
 
 ---
 
-## Architektura
+## Architecture
 
 ```
 docs/            frontend + GitHub Pages
-  index.html     cały interfejs (HTML, CSS, JS w jednym pliku)
-  engine.js      silnik turnieju w przeglądarce, używany w trybie demo
-  demo-data.json przebieg prawdziwego turnieju z zanonimizowanymi imionami
+  index.html     the whole interface (HTML, CSS and JS in one file)
+  engine.js      in-browser tournament engine, used in demo mode
+  demo-data.json a real tournament with anonymised names
 server/
-  server.py      serwer HTTP i logika turnieju (Python, tylko biblioteka standardowa)
-tests/           symulacje pełnych turniejów dla obu silników
+  server.py      HTTP server and tournament logic (Python, standard library only)
+tests/           full-tournament simulations for both engines
 ```
 
-- **Tryb serwerowy** (tak działało to na turnieju): `server.py` trzyma stan w jednym pliku JSON i udostępnia proste API (`api/state`, `api/join`, `api/score`, `api/admin`). Uprawnienia organizatora daje token w części `#admin-…` linku. Nie trafia on do logów serwera ani do nagłówka Referer.
-- **Tryb demo** (GitHub Pages): ten sam interfejs, ale zamiast serwera działa `engine.js`, czyli przeniesiona 1:1 logika z `server.py`. Stan zapisuje się w `localStorage` przeglądarki.
-- Interfejs wybiera tryb sam: na `github.io`, z pliku lub z parametrem `?demo` działa demo, w pozostałych przypadkach łączy się z serwerem.
+- **Server mode** (how it ran at the event): `server.py` keeps the state in a single JSON file and exposes a small API (`api/state`, `api/join`, `api/score`, `api/admin`). Organizer rights come from a token in the `#admin-…` part of the link, which never reaches server logs or the Referer header.
+- **Demo mode** (GitHub Pages): the same interface, but instead of the server it uses `engine.js`, a 1:1 port of the logic in `server.py`. The state is stored in the browser's `localStorage`.
+- The interface picks the mode by itself: on `github.io`, from a local file or with `?demo` it runs the demo, otherwise it connects to the server.
 
-## Uruchomienie u siebie
+## Running it yourself
 
 ```bash
 python3 server/server.py
@@ -97,29 +99,23 @@ python3 server/server.py
 # Link organizatora (nie udostępniaj): http://localhost:8187/#admin-...
 ```
 
-Wymagany jest tylko Python 3.10+. Zmienne środowiskowe: `TT_PORT`, `TT_BIND`, `TT_DATA` (katalog na stan i token) oraz `TT_STATIC`.
+Only Python 3.10+ is required. Environment variables: `TT_PORT`, `TT_BIND`, `TT_DATA` (directory for the state and token) and `TT_STATIC`.
 
-Żeby wystawić turniej do internetu, uruchom serwer za reverse proxy (np. nginx z HTTPS) pod trudną do zgadnięcia ścieżką i podaj uczestnikom zwykły link, a link z `#admin-…` zachowaj dla siebie. Pamiętaj, żeby podmienić `og:url` i `og:image` w `docs/index.html` na swój adres, jeśli zależy Ci na ładnym podglądzie linku w komunikatorach.
+To put a tournament online, run the server behind a reverse proxy (e.g. nginx with HTTPS) under a hard-to-guess path. Give participants the regular link and keep the `#admin-…` link to yourself. If you want a nice link preview in messaging apps, change `og:url` and `og:image` in `docs/index.html` to your own address.
 
-## Testy
+## Tests
 
 ```bash
-python3 -m unittest discover tests   # logika serwera
-node tests/engine.test.mjs            # silnik przeglądarkowy
+python3 -m unittest discover tests   # server logic
+node tests/engine.test.mjs            # browser engine
 ```
 
-Oba zestawy rozgrywają pełne turnieje z losowymi wynikami dla 3–40 graczy. Sprawdzają przy tym, że każdy gra co najmniej dwa mecze, drabinka jest pełna, rozstawienie się zgadza, a punkty są walidowane.
+Both suites play full tournaments with random results for 3–40 players. They check that everyone plays at least twice, the bracket is full, the seeding is right and scores are validated.
 
-## Prywatność
+## Privacy
 
-W repozytorium nie ma prawdziwych imion, nazwy firmy ani adresu, pod którym działał turniej. Dane w demo to prawdziwy przebieg rozgrywek z wymyślonymi imionami.
+The repository contains no real names, no company name and no address of the server the tournament ran on. The demo data is the real course of the tournament with made-up names.
 
----
-
-## English summary
-
-A small web app for running an office table-tennis tournament: sign-ups via a shared link, two qualifying rounds (everyone plays at least twice), a Lucky Losers round, a seeded knockout bracket, a podium, an overall table and stats. It was **vibecoded with Claude** for a company team-building event where close to 30 people signed up to play for fun: **the first version was live about 20 minutes after the first prompt**, followed by a few quick iterations of fixes, mostly while the tournament was being played. The backend is a single stdlib-only Python file storing state in JSON. The GitHub Pages demo runs a 1:1 JavaScript port of the same logic in the browser.
-
-## Licencja
+## License
 
 [MIT](LICENSE)
