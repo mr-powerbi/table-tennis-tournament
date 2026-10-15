@@ -170,6 +170,11 @@ tr.me td{font-weight:800}
 details.statsbox .stats{margin-bottom:16px}
 .match .ticking{color:var(--coral-deep);font-weight:700}
 .timing{margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:.92rem}
+.stt{font-size:.82rem;font-weight:700;white-space:nowrap}
+.st-in{color:var(--win)}
+.st-ll{color:var(--coral)}
+.st-out{color:var(--muted);font-weight:600}
+tr.out td{color:var(--muted)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--card);align-self:start}
 .seg button{appearance:none;border:0;background:transparent;color:var(--ink);font:inherit;font-weight:700;font-size:.82rem;padding:8px 14px;cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--coral);color:var(--on-coral)}
@@ -330,7 +335,7 @@ function applyStatic(){
   document.querySelectorAll('[data-lang]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.lang===LANG)));
 }
 function setLang(l){ LANG=l; LS.set('tt_lang',l); try{ const u=new URL(location.href); if(u.searchParams.has('lang')){ u.searchParams.delete('lang'); history.replaceState(null,'',u.pathname+u.search+u.hash); } }catch(e){} applyStatic(); if(S) render(); }
-let S=null, lastRev=-1, busy=false, dlgOpen=false, statsOpen=false, tblView='final';
+let S=null, lastRev=-1, busy=false, dlgOpen=false, statsOpen=false, tblView=null;
 
 function toast(msg){const t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,3200);}
 
@@ -589,8 +594,9 @@ function roundSec(stage,compact){
 function tableSec(){
   const R=S.ranking||[]; if(!R.length) return '';
   const qual=S.phase==='qual', post=['ko','done'].includes(S.phase), pre=!qual&&!post;
-  const rankView=post&&tblView==='rank', zones=pre||rankView;
-  const showStage=S.phase==='ll'||post;
+  const view=tblView||(S.phase==='ko'?'rank':'final');
+  const rankView=post&&view==='rank', zones=pre||rankView;
+  const showStage=post&&!rankView, showStatus=pre||rankView;
   const K=S.K, tie=new Set(S.tie||[]), sel=new Set(S.sel||[]);
   const D=S.D??K, LL=S.L??0;
   const idx={}; R.forEach((r,i)=>idx[r.id]=i);
@@ -607,20 +613,38 @@ function tableSec(){
     const th=S.ko.third, tw=th&&winnerOf(th);
     if(tw){ const tl=tw===th.a?th.b:th.a; info[tw].lvl+=0.3; info[tw].lbl=tr('3. miejsce','3rd place'); info[tl].lvl+=0.1; info[tl].lbl=tr('4. miejsce','4th place'); }
   }
+  const koSt={};
+  if(S.ko){
+    const RR=S.ko.rounds;
+    RR.forEach(r=>r.forEach(m=>{ [m.a,m.b].forEach(id=>{ if(id&&!koSt[id]) koSt[id]='in'; }); const w=winnerOf(m); if(w){ const lo=w===m.a?m.b:m.a; if(lo) koSt[lo]='out'; } }));
+    const th=S.ko.third; if(th){ [th.a,th.b].forEach(id=>{ if(id) koSt[id]='third'; }); if(winnerOf(th)){ koSt[th.a]='out'; koSt[th.b]='out'; } }
+    const fw=winnerOf(RR[RR.length-1][0]); if(fw) koSt[fw]='champ';
+  }
+  const llM=id=>(S.ll||[]).find(x=>x.a===id||x.b===id);
+  const status=(id,i)=>{
+    if(post){ const k=koSt[id]; return k==='champ'?['in',tr('Mistrz','Champion')]:k==='in'?['in',tr('W grze','Still in')]:k==='third'?['ll',tr('Gra o 3. miejsce','Playing for 3rd place')]:k==='out'?['out',tr('Odpadł(a) w drabince','Out in the bracket')]:llM(id)?['out',tr('Odpadł(a) w Lucky Losers','Out in Lucky Losers')]:['out',tr('Odpadł(a) w kwalifikacjach','Out in qualifying')]; }
+    if(S.phase==='ll'){
+      if(info[id].lvl===6) return ['in',tr('W drabince','In the bracket')];
+      const m=llM(id); if(m){ if(valid(m.sa,m.sb)) return ['out',tr('Odpadł(a) w Lucky Losers','Out in Lucky Losers')]; return ['ll',tr('Gra w Lucky Losers','Playing Lucky Losers')]; }
+      return ['out',tr('Poza drabinką','Out of the bracket')];
+    }
+    return i<D?['in',tr('Awans bezpośredni','Direct qualification')]:i<D+2*LL?['ll','Lucky Losers']:['out',tr('Poza drabinką','Out of the bracket')];
+  };
   const rows=post&&!rankView?[...R].sort((a,b)=>info[b.id].lvl-info[a.id].lvl||idx[a.id]-idx[b.id]):R;
   const body=rows.map((r,i)=>{
     const inK=qual?sel.has(r.id):zones&&i<D;
-    const cls=[zones&&(i===D-1||(LL&&i===D+2*LL-1))?'cut':'', inK?'in':'', zones&&i>=D&&i<D+2*LL?'llz':'', tie.has(r.id)?'tie':'', isMe(r.id)?'me':''].join(' ');
+    const st=(showStatus?status(r.id,i):null);
+    const cls=[st&&st[0]==='out'?'out':'', zones&&(i===D-1||(LL&&i===D+2*LL-1))?'cut':'', inK?'in':'', zones&&i>=D&&i<D+2*LL?'llz':'', tie.has(r.id)?'tie':'', isMe(r.id)?'me':''].join(' ');
     const diff=T()===1?r.pw-r.pl:r.sw-r.sl;
-    return `<tr class="${cls}"><td class="num">${i+1}</td><td>${esc(r.name)}${isMe(r.id)?youLbl():''}</td>${showStage?`<td>${info[r.id].lbl}</td>`:''}<td class="num">${r.played}</td><td class="num">${r.w}</td><td class="num">${T()===1?`${r.pw}:${r.pl}`:`${r.sw}:${r.sl}`}</td><td class="num">${diff>0?'+':''}${diff}</td>${qual&&S.admin?`<td><input type="checkbox" aria-label="${tr('Awans','Qualifies')}: ${esc(r.name)}" data-sel="${r.id}" ${sel.has(r.id)?'checked':''}></td>`:qual?`<td>${sel.has(r.id)?'✓':''}</td>`:''}</tr>`;}).join('');
+    return `<tr class="${cls}"><td class="num">${i+1}</td><td>${esc(r.name)}${isMe(r.id)?youLbl():''}</td>${showStage?`<td>${info[r.id].lbl}</td>`:''}${showStatus?`<td><span class="stt st-${st[0]}">${st[1]}</span></td>`:''}<td class="num">${r.played}</td><td class="num">${r.w}</td><td class="num">${T()===1?`${r.pw}:${r.pl}`:`${r.sw}:${r.sl}`}</td><td class="num">${diff>0?'+':''}${diff}</td>${qual&&S.admin?`<td><input type="checkbox" aria-label="${tr('Awans','Qualifies')}: ${esc(r.name)}" data-sel="${r.id}" ${sel.has(r.id)?'checked':''}></td>`:qual?`<td>${sel.has(r.id)?'✓':''}</td>`:''}</tr>`;}).join('');
   const order=T()===1?tr('zwycięstwa, bilans punktów, zdobyte punkty','wins, point difference, points scored'):tr('zwycięstwa, bilans setów, bilans punktów','wins, set difference, point difference');
   const sub=qual?tr(`Na granicy awansu jest remis (podświetlone wiersze). Organizator wybiera ${K} osób do drabinki.`,`There is a tie at the cut-off (highlighted rows). The organizer picks ${K} players for the bracket.`)
     :post&&!rankView?tr(`Miejsca według etapu, do którego ktoś doszedł, a w obrębie etapu według rankingu z rund 1–2 (${order}). Mecze, zwycięstwa i punkty liczone z rund 1–2.`,`Places by the stage each player reached; within a stage, by the rounds 1–2 ranking (${order}). Matches, wins and points are counted from rounds 1–2.`)
     :tr(`${LL?`Miejsca 1–${D}: bezpośrednio do drabinki. Miejsca ${D+1}–${D+2*LL}: Lucky Losers, zwycięzcy ${LL} meczów dołączają do drabinki.${R.length>D+2*LL?' Pozostali kończą udział.':''}`:`Do drabinki wchodzi ${K} najlepszych.`} Kolejność: ${order}.`,
-        `${LL?`Places 1–${D}: straight into the bracket. Places ${D+1}–${D+2*LL}: Lucky Losers, the winners of ${LL} ${LL===1?'match':'matches'} join the bracket.${R.length>D+2*LL?' Everyone else is out.':''}`:`The top ${K} go into the bracket.`} Order: ${order}.`);
+        `${LL?`Places 1–${D}: straight into the bracket. Places ${D+1}–${D+2*LL}: Lucky Losers, the winners of ${LL} ${LL===1?'match':'matches'} join the bracket.${R.length>D+2*LL?' Everyone else is out.':''}`:`The top ${K} go into the bracket.`} Order: ${order}.`)+(zones?tr(` Poniżej ostatniej linii odpadają przy obecnym układzie; kolumna Status pokazuje, kto jeszcze gra.`,` Anyone below the last line is out at the current standings; the Status column shows who is still in.`):'');
   const seg=post?`<div class="seg" role="group" aria-label="${tr('Widok tabeli','Table view')}"><button type="button" data-tview="final" aria-pressed="${!rankView}">${tr('Miejsca końcowe','Final standings')}</button><button type="button" data-tview="rank" aria-pressed="${rankView}">${tr('Progi awansu','Qualification cut-offs')}</button></div>`:'';
   const head=`<div class="sechead"><div><h2>${qual?tr('Tabela: awans do drabinki','Standings: bracket qualification'):tr('Tabela','Standings')}</h2><p class="sub">${sub}</p></div>${seg}</div>`;
-  return `<section>${head}<div class="tablewrap"><table><thead><tr><th class="num">#</th><th>${tr('Zawodnik','Player')}</th>${showStage?`<th>${tr('Etap','Stage')}</th>`:''}<th class="num">${tr('M','P')}</th><th class="num">${tr('Z','W')}</th><th class="num">${T()===1?tr('Punkty','Points'):tr('Sety','Sets')}</th><th class="num">+/−</th>${qual?`<th>${tr('Awans','Qualifies')}</th>`:''}</tr></thead><tbody>${body}</tbody></table></div>
+  return `<section>${head}<div class="tablewrap"><table><thead><tr><th class="num">#</th><th>${tr('Zawodnik','Player')}</th>${showStage?`<th>${tr('Etap','Stage')}</th>`:''}${showStatus?`<th>${tr('Status','Status')}</th>`:''}<th class="num">${tr('M','P')}</th><th class="num">${tr('Z','W')}</th><th class="num">${T()===1?tr('Punkty','Points'):tr('Sety','Sets')}</th><th class="num">+/−</th>${qual?`<th>${tr('Awans','Qualifies')}</th>`:''}</tr></thead><tbody>${body}</tbody></table></div>
     ${zones?`<div class="cutlabel">${tr('Przerywane linie: granica bezpośredniego awansu','Dashed lines: direct qualification cut-off')}${LL?tr(' i Lucky Losers',' and Lucky Losers'):''}</div>`:''}
     ${qual&&S.admin?`<div class="actions" style="margin-top:12px"><span class="chip mono">${sel.size}/${K} ${tr('wybranych','selected')}</span><button class="btn" data-admin="startko" ${sel.size!==K?'disabled':''}>${tr('Uruchom drabinkę','Start the bracket')}</button></div>`:''}
     ${qual&&!S.admin?`<p class="notice warn" style="margin-top:12px">${tr('Czekamy na decyzję organizatora. Drabinka pojawi się tu automatycznie.','Waiting for the organizer’s decision. The bracket will appear here automatically.')}</p>`:''}</section>`;
