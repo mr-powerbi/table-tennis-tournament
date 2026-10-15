@@ -103,5 +103,27 @@ class TournamentTest(unittest.TestCase):
             S.set_score(s, "r1", s["r1"][0]["id"], None, None, False, 11, 3)
 
 
+    def test_match_timing_start_to_score(self):
+        s = new_tournament(4)
+        m = s["r1"][0]
+        S.start_match(s, "r1", m["id"])
+        self.assertIn("t0", m)
+        self.assertNotIn("t1", m)
+        S.set_score(s, "r1", m["id"], None, None, True, 11, 7)
+        self.assertIn("t1", m, "wpisanie wyniku kończy pomiar")
+        with self.assertRaises(S.Err):
+            S.start_match(s, "r1", m["id"], cancel=True)
+        S.set_score(s, "r1", m["id"], None, None, True)
+        self.assertNotIn("t0", m)
+        self.assertNotIn("t1", m)
+
+    def test_untimed_match_has_no_duration(self):
+        s = new_tournament(4)
+        m = s["r1"][0]
+        S.set_score(s, "r1", m["id"], None, None, True, 11, 7)
+        self.assertNotIn("t0", m)
+        self.assertNotIn("t1", m)
+
+
 if __name__ == "__main__":
     unittest.main()

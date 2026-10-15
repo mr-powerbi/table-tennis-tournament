@@ -3,7 +3,7 @@
  *
  * To wierne przeniesienie logiki z server/server.py do JavaScriptu.
  * Frontend rozmawia z nim tak samo jak z serwerem: TTEngine.request(path, body)
- * przyjmuje te same ścieżki (api/state, api/join, api/leave, api/score, api/admin)
+ * przyjmuje te same ścieżki (api/state, api/join, api/leave, api/score, api/start, api/admin)
  * i zwraca ten sam publiczny stan. Stan trzymany jest w localStorage,
  * a odwiedzający jest zawsze organizatorem.
  */
@@ -135,7 +135,10 @@
   }
 
   function setp(m, a, b) {
-    if (m.a !== a || m.b !== b) Object.assign(m, { a, b, sa: null, sb: null, pa: null, pb: null });
+    if (m.a !== a || m.b !== b) {
+      Object.assign(m, { a, b, sa: null, sb: null, pa: null, pb: null });
+      delete m.t0; delete m.t1;
+    }
   }
 
   function propagate(s) {
@@ -240,7 +243,17 @@
       if (oldW !== newW) throw new Err('Ta zmiana zmienia zwycięzcę zamkniętej rundy. Najpierw cofnij turniej do tej rundy w panelu organizatora.');
     }
     Object.assign(m, clearing ? { sa: null, sb: null, pa: null, pb: null } : { sa, sb, pa, pb });
+    // Czas meczu: start zapisuje organizator, wpisanie wyniku jest końcem.
+    if (clearing) { delete m.t0; delete m.t1; } else if (m.t0 && !m.t1) m.t1 = now();
     if (stage === 'ko' || stage === 'third') propagate(s); else advance(s);
+  }
+
+  function startMatch(s, stage, id, cancel) {
+    if (!STAGE_PHASE[stage]) throw new Err('Nieznany etap.');
+    const m = findMatch(s, stage, id);
+    if (!(m.a && m.b)) throw new Err('W tym meczu nie ma jeszcze obu zawodników.');
+    if (m.sa !== null && m.sa !== undefined) throw new Err('Ten mecz ma już wynik.');
+    if (cancel) { delete m.t0; delete m.t1; } else { m.t0 = now(); delete m.t1; }
   }
 
   function cleanName(n) {
@@ -397,6 +410,8 @@
         s.players = s.players.filter((x) => x !== p);
       } else if (path === 'api/score') {
         setScore(s, body.stage, body.id, body.sa, body.sb, body.pa, body.pb);
+      } else if (path === 'api/start') {
+        startMatch(s, body.stage, body.id, !!body.cancel);
       } else if (path === 'api/admin') {
         adminAction(s, body);
       } else {
@@ -439,10 +454,12 @@
       if (T === 1) {
         const lose = Math.random() < 0.15 ? 10 + Math.floor(Math.random() * 3) : Math.floor(Math.random() * 10);
         const [pa, pb] = Math.random() < 0.5 ? [lose >= 10 ? lose + 2 : 11, lose] : [lose, lose >= 10 ? lose + 2 : 11];
+        m.t0 = new Date(Date.now() - (5 + (pa + pb) * 0.5 + Math.random() * 6) * 60000).toISOString();
         setScore(s, st, m.id, null, null, pa, pb);
       } else {
         const l = Math.floor(Math.random() * T);
         const [sa, sb] = Math.random() < 0.5 ? [T, l] : [l, T];
+        m.t0 = new Date(Date.now() - (8 + Math.random() * 25) * 60000).toISOString();
         setScore(s, st, m.id, sa, sb);
       }
     }

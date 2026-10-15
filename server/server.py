@@ -199,6 +199,8 @@ def build_ko(s, ordered):
 def setp(m, a, b):
     if m["a"] != a or m["b"] != b:
         m["a"], m["b"], m["sa"], m["sb"], m["pa"], m["pb"] = a, b, None, None, None, None
+        m.pop("t0", None)
+        m.pop("t1", None)
 
 
 def propagate(s):
@@ -341,10 +343,31 @@ def set_score(s, stage, m_id, sa, sb, admin, pa=None, pb=None):
             raise Err("Ta zmiana zmienia zwycięzcę zamkniętej rundy. Najpierw cofnij turniej do tej rundy w panelu organizatora.")
     m["sa"], m["sb"] = (None, None) if clearing else (sa, sb)
     m["pa"], m["pb"] = (None, None) if clearing else (pa, pb)
+    # Czas meczu: start zapisuje organizator, wpisanie wyniku jest końcem.
+    if clearing:
+        m.pop("t0", None)
+        m.pop("t1", None)
+    elif m.get("t0") and not m.get("t1"):
+        m["t1"] = now()
     if stage in ("ko", "third"):
         propagate(s)
     else:
         advance(s)
+
+
+def start_match(s, stage, m_id, cancel=False):
+    if stage not in STAGE_PHASE:
+        raise Err("Nieznany etap.")
+    m = find_match(s, stage, m_id)
+    if not (m["a"] and m["b"]):
+        raise Err("W tym meczu nie ma jeszcze obu zawodników.")
+    if m["sa"] is not None:
+        raise Err("Ten mecz ma już wynik.")
+    m.pop("t1", None)
+    if cancel:
+        m.pop("t0", None)
+    else:
+        m["t0"] = now()
 
 
 def admin_action(s, body):
@@ -600,6 +623,10 @@ class H(BaseHTTPRequestHandler):
                 elif path == "/api/score":
                     sa, sb = body.get("sa"), body.get("sb")
                     set_score(s, body.get("stage"), body.get("id"), sa, sb, admin, body.get("pa"), body.get("pb"))
+                elif path == "/api/start":
+                    if not admin:
+                        return self.send(403, {"error": "Brak uprawnień organizatora."})
+                    start_match(s, body.get("stage"), body.get("id"), bool(body.get("cancel")))
                 elif path == "/api/admin":
                     if not admin:
                         return self.send(403, {"error": "Brak uprawnień organizatora."})

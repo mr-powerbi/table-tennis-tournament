@@ -17,7 +17,9 @@ The app's interface is in Polish, because that's who it was built for. The docum
 **For participants (regular link)**
 - Sign yourself up, or several people from one phone. Your own entries can be withdrawn until the draw.
 - Live view: the page refreshes itself every few seconds.
-- Current stage, ranking, bracket, podium, overall table, all results and stats.
+- Current stage, one combined standings table, bracket, podium, all results and a collapsible stats panel (right under the bracket).
+- Organizer panel opens as a pop-up from a button at the top, so there is no scrolling to the bottom.
+- Match timer: the organizer taps *Start* on a match, entering the result ends it. Stats then show average, longest and shortest match time and how deuce games affect length.
 - Matches of the people signed up from your phone are highlighted.
 
 **For the organizer (link with a secret token)**

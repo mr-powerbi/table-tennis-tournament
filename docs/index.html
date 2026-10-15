@@ -167,6 +167,15 @@ tr.me td{font-weight:800}
   @keyframes rise{from{transform:translateY(16px);opacity:.2}to{transform:none;opacity:1}}
 }
 
+details.stats .stats{margin-bottom:16px}
+.match .ticking{color:var(--coral-deep);font-weight:700}
+.timing{margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:.92rem}
+.adminbar{position:sticky;top:0;z-index:30;display:flex;justify-content:flex-end;padding:10px 0 0;pointer-events:none;height:0;overflow:visible}
+.adminbar .btn{pointer-events:auto;box-shadow:0 6px 20px rgba(0,0,0,.2);transform:translateY(6px)}
+dialog#adm{width:min(760px,calc(100% - 24px));max-height:calc(100dvh - 24px);overflow:auto}
+#adm .admhead{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 16px 0}
+#adm .admhead h2{font-size:1.2rem}
+#adm .admin{border:0;border-radius:0;background:transparent}
 dialog{border:0;border-radius:20px;padding:0;width:min(440px,calc(100% - 32px));background:var(--card);color:var(--ink);box-shadow:0 30px 80px rgba(0,0,0,.25)}
 dialog::backdrop{background:rgba(20,15,12,.45)}
 .dlg{padding:20px}
@@ -228,6 +237,7 @@ footer a{color:inherit}
 <footer class="wrap"><span class="live" id="live">Wyniki odświeżają się same</span> · <a href="https://github.com/mr-powerbi/table-tennis-tournament" rel="noopener">Kod na GitHubie</a></footer>
 
 <dialog id="dlg"><form method="dialog" class="dlg" id="dlgform"></form></dialog>
+<dialog id="adm" aria-label="Panel organizatora"><div class="admhead"><h2>Panel organizatora</h2><button type="button" class="ghost small" id="admclose">Zamknij ✕</button></div><div id="admbody"></div></dialog>
 <div class="toast" id="toast" hidden></div>
 
 <script src="engine.js"></script>
@@ -240,7 +250,7 @@ const LS={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return 
 (function(){const m=location.hash.match(/^#admin-([A-Za-z0-9_-]{10,})$/); if(m){LS.set('tt_admin',m[1]); history.replaceState(null,'',location.pathname);}})();
 const ADMIN=LS.get('tt_admin');
 let mine=LS.get('tt_mine')||[]; {const o=LS.get('tt_me'); if(o&&o.id&&!mine.some(x=>x.id===o.id)){mine.push(o);LS.set('tt_mine',mine);} LS.del('tt_me');}
-let S=null, lastRev=-1, busy=false, dlgOpen=false;
+let S=null, lastRev=-1, busy=false, dlgOpen=false, statsOpen=false;
 
 function toast(msg){const t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,3200);}
 
@@ -302,26 +312,31 @@ function fmtDate(iso){try{return new Date(iso).toLocaleString('pl-PL',{weekday:'
 function render(){
   header(); steps();
   const out=[];
+  if(S.admin) out.push(adminBar());
   if(S.demo) out.push(demoBar());
   if(S.phase==='done') out.push(podium());
   if(S.phase==='signup') out.push(signup());
-  if(['ko','done'].includes(S.phase)) out.push(bracket());
-  if(S.phase==='qual') out.push(rankingSec(true));
+  if(['ko','done'].includes(S.phase)) out.push(bracket(), statsSec());
+  if(S.phase==='qual') out.push(tableSec());
   if(S.phase==='ll') out.push(llSec());
   if(S.phase==='r2') out.push(qualBox());
   if(S.phase==='r2') out.push(roundSec('r2'));
   if(S.phase==='ll') out.push(roundSec('r2'));
   if(['r1','r2','qual','ll'].includes(S.phase)) out.push(roundSec('r1'));
-  if(['r1','r2','ll'].includes(S.phase) && S.ranking.length) out.push(rankingSec(false));
-  if(['ko','done'].includes(S.phase)) out.push(`<details class="how"><summary>Kwalifikacje: rundy 1–2, ranking i Lucky Losers</summary>${S.ll&&S.ll.length?llSec(true):''}${roundSec('r1',true)}${S.r2.length?roundSec('r2',true):''}${rankingSec(false,true)}</details>`);
-  out.push(overallTable());
+  if(['r1','r2','ll'].includes(S.phase) && S.ranking.length) out.push(tableSec());
+  if(['ko','done'].includes(S.phase)) out.push(`<details class="how"><summary>Kwalifikacje: rundy 1–2 i Lucky Losers</summary>${S.ll&&S.ll.length?llSec(true):''}${roundSec('r1',true)}${S.r2.length?roundSec('r2',true):''}</details>`);
+  if(['ko','done'].includes(S.phase)) out.push(tableSec());
   out.push(allResults());
-  out.push(statsSec());
+  if(!['ko','done'].includes(S.phase)) out.push(statsSec());
   out.push(howto());
-  if(S.admin) out.push(adminPanel());
+  const ad=$('#adm');
+  if(!S.admin){ if(ad.open) ad.close(); $('#admbody').innerHTML=''; }
+  else if(!(ad.open&&ad.contains(document.activeElement))) $('#admbody').innerHTML=adminPanel();
   $('#app').innerHTML=out.join('');
   bind();
 }
+
+function adminBar(){ return `<div class="adminbar"><button type="button" class="btn small" data-adminopen>⚙ Panel organizatora</button></div>`; }
 
 function demoBar(){
   const canSim=['r1','r2','ll','ko'].includes(S.phase);
@@ -368,7 +383,9 @@ function matchBtn(m,stage,opts={}){
   if(m.half) extra=`<span class="note">Mecz uzupełniający: liczy się tylko dla ${esc(name(m.a))} (nieparzysta liczba graczy).</span>`;
   else if(!done&&canEdit) extra=`<span class="cta">Wpisz wynik</span>`;
   else if(!done&&ready&&mine) extra=`<span class="note">Twój mecz. Po grze podaj wynik organizatorowi.</span>`;
-  return `<button type="button" class="match ${mine?'mine':''} ${canEdit?'':'locked'}" ${canEdit?`data-score="${stage}:${m.id}"`:'tabindex="-1"'} aria-label="${ready?esc(name(m.a)+' kontra '+name(m.b)):'Mecz w oczekiwaniu'}">${pl(m.a,pts?m.pa:m.sa)}${pl(m.b,pts?m.pb:m.sb)}${extra}</button>`;
+  const live=!done&&ready&&m.t0?`<span class="note ticking">🏓 W grze od ${fmtClock(m.t0)}</span>`:'';
+  const ms=done?matchMs(m):null, durTag=ms!=null?`<span class="note">⏱ ${fmtDur(ms)}</span>`:'';
+  return `<button type="button" class="match ${mine?'mine':''} ${canEdit?'':'locked'}" ${canEdit?`data-score="${stage}:${m.id}"`:'tabindex="-1"'} aria-label="${ready?esc(name(m.a)+' kontra '+name(m.b)):'Mecz w oczekiwaniu'}">${pl(m.a,pts?m.pa:m.sa)}${pl(m.b,pts?m.pb:m.sb)}${live}${extra}${durTag}</button>`;
 }
 
 function qualBox(){
@@ -398,62 +415,65 @@ function llSec(compact){
   return compact?`<div style="margin-block:12px 20px">${body}</div>`:`<section>${body}</section>`;
 }
 
-function overallTable(){
-  const R=S.ranking||[]; if(!R.length) return '';
-  const idx={}; R.forEach((r,i)=>idx[r.id]=i);
-  const info={}; R.forEach(r=>info[r.id]={lvl:0,lbl:['r1','r2'].includes(S.phase)?'Kwalifikacje':'Runda 2'});
-  const llDone=(S.ll||[]).filter(m=>valid(m.sa,m.sb));
-  (S.ll||[]).forEach(m=>{[m.a,m.b].forEach(id=>{if(info[id]){info[id].lvl=5;info[id].lbl='Lucky Losers';}});});
-  (S.llDirect||[]).forEach(id=>{if(info[id]){info[id].lvl=6;info[id].lbl='Awans bezpośredni';}});
-  llDone.forEach(m=>{const w=winnerOf(m); if(info[w]){info[w].lvl=6;info[w].lbl='Awans z Lucky Losers';}});
-  if(S.ko){
-    const RR=S.ko.rounds, last=RR.length-1;
-    RR.forEach((r,ri)=>r.forEach(m=>[m.a,m.b].forEach(id=>{ if(id&&info[id]){ info[id].lvl=10+ri; info[id].lbl=S.phase==='done'?roundName(r.length).replace(/y$/,''):(ri===last?'Finał':roundName(r.length).replace(/y$/,'')); } })));
-    const f=RR[last][0], fw=winnerOf(f);
-    if(fw){ info[fw].lvl=10+last+1; info[fw].lbl='Zwycięzca'; const fl=fw===f.a?f.b:f.a; info[fl].lbl='Finał (2. miejsce)'; }
-    const th=S.ko.third, tw=th&&winnerOf(th);
-    if(tw){ const tl=tw===th.a?th.b:th.a; info[tw].lvl+=0.3; info[tw].lbl='3. miejsce'; info[tl].lvl+=0.1; info[tl].lbl='4. miejsce'; }
-  }
-  const rows=[...R].sort((a,b)=>info[b.id].lvl-info[a.id].lvl||idx[a.id]-idx[b.id]);
-  const body=rows.map((r,i)=>`<tr class="${isMe(r.id)?'me':''}"><td class="num">${i+1}</td><td>${esc(r.name)}${isMe(r.id)?youLbl():''}</td><td>${info[r.id].lbl}</td><td class="num">${r.played}</td><td class="num">${r.w}</td><td class="num">${T()===1?`${r.pw}:${r.pl}`:`${r.sw}:${r.sl}`}</td></tr>`).join('');
-  return `<section><div class="sechead"><div><h2>Tabela ogólna</h2><p class="sub">Miejsca według etapu, do którego ktoś doszedł, a w obrębie etapu według rankingu z rund 1–2. Mecze, zwycięstwa i punkty liczone z rund 1–2.</p></div></div>
-    <div class="tablewrap"><table><thead><tr><th class="num">Miejsce</th><th>Zawodnik</th><th>Etap</th><th class="num">M</th><th class="num">Z</th><th class="num">${T()===1?'Punkty':'Sety'}</th></tr></thead><tbody>${body}</tbody></table></div></section>`;
-}
+function matchMs(m){ if(!(m&&m.t0&&m.t1)) return null; const d=Date.parse(m.t1)-Date.parse(m.t0); return d>0?d:null; }
+function fmtDur(ms){ const min=Math.round(ms/60000); if(min<1) return '<1 min'; if(min<60) return min+' min'; return Math.floor(min/60)+' h '+String(min%60).padStart(2,'0')+' min'; }
+function fmtClock(iso){ try{ return new Date(iso).toLocaleTimeString('pl-PL',{hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } }
 
 function statsSec(){
-  if(T()!==1) return '';
-  const seq=[];
-  const add=(ms,l)=>(ms||[]).forEach(m=>{ if(m.a&&m.b&&valid(m.sa,m.sb)&&m.pa!=null) seq.push([l,m]); });
+  const all=[];
+  const add=(ms,l)=>(ms||[]).forEach(m=>{ if(m.a&&m.b&&valid(m.sa,m.sb)) all.push([l,m]); });
   add(S.r1,'Runda 1'); add(S.r2,'Runda 2'); add(S.ll,'Lucky Losers');
   if(S.ko){ S.ko.rounds.forEach(r=>add(r,roundName(r.length).replace(/y$/,''))); if(S.ko.third) add([S.ko.third],'O 3. miejsce'); }
-  if(seq.length<3) return '';
-  const tot=seq.reduce((s,[,m])=>s+m.pa+m.pb,0);
-  const diff=m=>Math.abs(m.pa-m.pb), sum=m=>m.pa+m.pb;
-  const txt=([l,m])=>{const w=winnerOf(m),lo=w===m.a?m.b:m.a,hi=Math.max(m.pa,m.pb),lw=Math.min(m.pa,m.pb);return {w:`${esc(name(w))} – ${esc(name(lo))}`,d:`${hi}:${lw} · ${l}`};};
-  const pick=(f,cmp)=>seq.reduce((b,x)=>b===null||cmp(f(x[1]),f(b[1]),x,b)?x:b,null);
-  const blow=pick(diff,(a,b)=>a>b), close=pick(m=>m.pa+m.pb,(a,b,x,y)=>diff(x[1])<diff(y[1])||(diff(x[1])===diff(y[1])&&a>b)), longest=pick(sum,(a,b)=>a>b);
-  const deuce=seq.filter(([,m])=>Math.max(m.pa,m.pb)>11).length, zeros=seq.filter(([,m])=>Math.min(m.pa,m.pb)===0).length;
-  const P={}; const pl=id=>P[id]||(P[id]={id,pf:0,pa:0,w:0,n:0,run:0,best:0});
-  seq.forEach(([,m])=>{ const sides=m.half?[['a','b']]:[['a','b'],['b','a']];
-    sides.forEach(([me,op])=>{const x=pl(m[me]); const mine=me==='a'?m.pa:m.pb, th=me==='a'?m.pb:m.pa; x.pf+=mine; x.pa+=th; x.n++; if(mine>th){x.w++;x.run++;x.best=Math.max(x.best,x.run);} else x.run=0;}); });
-  const ps=Object.values(P);
-  const top=(f,min=1)=>ps.filter(x=>x.n>=min).sort((a,b)=>f(b)-f(a)||b.w-a.w)[0];
-  const mostPts=top(x=>x.pf), bestBal=top(x=>x.pf-x.pa), mostW=top(x=>x.w), streak=top(x=>x.best), wall=top(x=>-x.pa/x.n,2);
+  const seq=T()===1?all.filter(([,m])=>m.pa!=null):[];
+  const timed=all.map(([l,m])=>[l,m,matchMs(m)]).filter(x=>x[2]!=null);
   const card=(k,v,w,d,hot)=>`<div class="stat ${hot?'hot':''}"><div class="k">${k}</div><div class="v">${v}</div>${w?`<div class="w">${w}</div>`:''}${d?`<div class="d">${d}</div>`:''}</div>`;
-  const b=txt(blow), c=txt(close), lg=txt(longest);
-  return `<section><div class="sechead"><div><h2>Statystyki turnieju</h2><p class="sub">Liczone ze wszystkich rozegranych meczów, łącznie z Lucky Losers i drabinką.</p></div></div><div class="stats">
-    ${card('Rozegrane mecze',seq.length,'',`${tot} ${plural(tot,'punkt','punkty','punktów')}, średnio ${(tot/seq.length).toFixed(1)} na mecz`)}
-    ${card('Najwyższe zwycięstwo',b.d.split(' · ')[0],b.w,b.d.split(' · ')[1],true)}
-    ${card('Najbardziej zacięty mecz',c.d.split(' · ')[0],c.w,c.d.split(' · ')[1])}
-    ${card('Najdłuższy mecz',lg.d.split(' · ')[0],lg.w,`${sum(longest[1])} ${plural(sum(longest[1]),'punkt','punkty','punktów')} · ${lg.d.split(' · ')[1]}`)}
-    ${card('Najwięcej zwycięstw',mostW.w,esc(name(mostW.id)),`na ${mostW.n} ${plural(mostW.n,'mecz','mecze','meczów')}`,true)}
-    ${card('Najdłuższa seria zwycięstw',streak.best,esc(name(streak.id)),'meczów z rzędu')}
-    ${card('Najwięcej zdobytych punktów',mostPts.pf,esc(name(mostPts.id)),`w ${mostPts.n} ${plural(mostPts.n,'meczu','meczach','meczach')}`)}
-    ${card('Najlepszy bilans punktów',(bestBal.pf-bestBal.pa>0?'+':'')+(bestBal.pf-bestBal.pa),esc(name(bestBal.id)),`${bestBal.pf}:${bestBal.pa}`)}
-    ${wall?card('Najszczelniejsza obrona',(wall.pa/wall.n).toFixed(1),esc(name(wall.id)),'traconych punktów na mecz'):''}
-    ${card('Gra na przewagi',deuce,'',`${plural(deuce,'mecz skończył','mecze skończyły','meczów skończyło')} się po 10:10`)}
-    ${zeros?card('Do zera',zeros,'',`${plural(zeros,'mecz','mecze','meczów')} 11:0`):''}
-  </div></section>`;
+  const cards=[];
+  if(seq.length>=3){
+    const tot=seq.reduce((s,[,m])=>s+m.pa+m.pb,0);
+    const diff=m=>Math.abs(m.pa-m.pb), sum=m=>m.pa+m.pb;
+    const txt=([l,m])=>{const w=winnerOf(m),lo=w===m.a?m.b:m.a,hi=Math.max(m.pa,m.pb),lw=Math.min(m.pa,m.pb);return {w:`${esc(name(w))} – ${esc(name(lo))}`,d:`${hi}:${lw} · ${l}`};};
+    const pick=(f,cmp)=>seq.reduce((b,x)=>b===null||cmp(f(x[1]),f(b[1]),x,b)?x:b,null);
+    const blow=pick(diff,(a,b)=>a>b), close=pick(m=>m.pa+m.pb,(a,b,x,y)=>diff(x[1])<diff(y[1])||(diff(x[1])===diff(y[1])&&a>b)), longest=pick(sum,(a,b)=>a>b);
+    const deuce=seq.filter(([,m])=>Math.max(m.pa,m.pb)>11).length, zeros=seq.filter(([,m])=>Math.min(m.pa,m.pb)===0).length;
+    const dT=timed.filter(x=>x[1].pa!=null&&Math.max(x[1].pa,x[1].pb)>11), nT=timed.filter(x=>x[1].pa!=null&&Math.max(x[1].pa,x[1].pb)<=11);
+    const avgOf=a=>a.reduce((s,x)=>s+x[2],0)/a.length;
+    const deuceNote=dT.length&&nT.length?` Średnio ${fmtDur(avgOf(dT))} wobec ${fmtDur(avgOf(nT))} w pozostałych.`:'';
+    const P={}; const pl=id=>P[id]||(P[id]={id,pf:0,pa:0,w:0,n:0,run:0,best:0});
+    seq.forEach(([,m])=>{ const sides=m.half?[['a','b']]:[['a','b'],['b','a']];
+      sides.forEach(([me,op])=>{const x=pl(m[me]); const mine=me==='a'?m.pa:m.pb, th=me==='a'?m.pb:m.pa; x.pf+=mine; x.pa+=th; x.n++; if(mine>th){x.w++;x.run++;x.best=Math.max(x.best,x.run);} else x.run=0;}); });
+    const ps=Object.values(P);
+    const top=(f,min=1)=>ps.filter(x=>x.n>=min).sort((a,b)=>f(b)-f(a)||b.w-a.w)[0];
+    const mostPts=top(x=>x.pf), bestBal=top(x=>x.pf-x.pa), mostW=top(x=>x.w), streak=top(x=>x.best), wall=top(x=>-x.pa/x.n,2);
+    const b=txt(blow), c=txt(close), lg=txt(longest);
+    const R=S.ranking||[], idx={}; R.forEach((r,i)=>idx[r.id]=i);
+    let up=null; seq.forEach(([l,m])=>{ const w=winnerOf(m), lo=w===m.a?m.b:m.a; if(idx[w]==null||idx[lo]==null) return; const gap=idx[w]-idx[lo]; if(gap>0&&(!up||gap>up.gap)) up={gap,w,lo,l,m}; });
+    const tight=seq.filter(([,m])=>diff(m)===2).length;
+    cards.push(card('Rozegrane mecze',seq.length,'',`${tot} ${plural(tot,'punkt','punkty','punktów')}, średnio ${(tot/seq.length).toFixed(1)} na mecz`));
+    cards.push(card('Najwyższe zwycięstwo',b.d.split(' · ')[0],b.w,b.d.split(' · ')[1],true));
+    cards.push(card('Najbardziej zacięty mecz',c.d.split(' · ')[0],c.w,c.d.split(' · ')[1]));
+    cards.push(card('Najdłuższy mecz (punkty)',lg.d.split(' · ')[0],lg.w,`${sum(longest[1])} ${plural(sum(longest[1]),'punkt','punkty','punktów')} · ${lg.d.split(' · ')[1]}`));
+    cards.push(card('Najwięcej zwycięstw',mostW.w,esc(name(mostW.id)),`na ${mostW.n} ${plural(mostW.n,'mecz','mecze','meczów')}`,true));
+    cards.push(card('Najdłuższa seria zwycięstw',streak.best,esc(name(streak.id)),'meczów z rzędu'));
+    cards.push(card('Najwięcej zdobytych punktów',mostPts.pf,esc(name(mostPts.id)),`w ${mostPts.n} ${plural(mostPts.n,'meczu','meczach','meczach')}`));
+    cards.push(card('Najlepszy bilans punktów',(bestBal.pf-bestBal.pa>0?'+':'')+(bestBal.pf-bestBal.pa),esc(name(bestBal.id)),`${bestBal.pf}:${bestBal.pa}`));
+    if(wall) cards.push(card('Najszczelniejsza obrona',(wall.pa/wall.n).toFixed(1),esc(name(wall.id)),'traconych punktów na mecz'));
+    cards.push(card('Gra na przewagi',deuce,'',`${plural(deuce,'mecz skończył','mecze skończyły','meczów skończyło')} się po 10:10.${deuceNote}`));
+    if(tight) cards.push(card('Mecze na styku',tight,'',`wygrane różnicą dokładnie 2 punktów (${Math.round(100*tight/seq.length)}% meczów)`));
+    if(up&&up.gap>=3){ const hi=Math.max(up.m.pa,up.m.pb), lw=Math.min(up.m.pa,up.m.pb); cards.push(card('Największa niespodzianka',`${up.gap} ${plural(up.gap,'miejsce','miejsca','miejsc')}`,`${esc(name(up.w))} pokonuje ${esc(name(up.lo))}`,`#${idx[up.w]+1} wygrywa z #${idx[up.lo]+1} · ${hi}:${lw} · ${up.l}`,true)); }
+    if(zeros) cards.push(card('Do zera',zeros,'',`${plural(zeros,'mecz','mecze','meczów')} 11:0`));
+  }
+  if(timed.length){
+    const tot=timed.reduce((s,x)=>s+x[2],0);
+    const lg=timed.reduce((b,x)=>x[2]>b[2]?x:b), sh=timed.reduce((b,x)=>x[2]<b[2]?x:b);
+    const nm=([,m])=>{ const w=winnerOf(m); return `${esc(name(w))} – ${esc(name(w===m.a?m.b:m.a))}`; };
+    const sc=([l,m])=>`${m.pa!=null?Math.max(m.pa,m.pb)+':'+Math.min(m.pa,m.pb)+' · ':''}${l}`;
+    cards.push(card('Średni czas meczu',fmtDur(tot/timed.length),'',`z ${timed.length} ${plural(timed.length,'zmierzonego meczu','zmierzonych meczów','zmierzonych meczów')}`,true));
+    cards.push(card('Najdłuższy mecz (czas)',fmtDur(lg[2]),nm(lg),sc(lg)));
+    if(timed.length>1) cards.push(card('Najkrótszy mecz (czas)',fmtDur(sh[2]),nm(sh),sc(sh)));
+    cards.push(card('Łącznie przy stole',fmtDur(tot),'','suma czasu zmierzonych meczów'));
+  }
+  if(!cards.length) return '';
+  return `<details class="how stats" data-stats ${statsOpen?'open':''}><summary>Statystyki turnieju</summary><p class="sub" style="margin:0 0 12px">Liczone ze wszystkich rozegranych meczów, łącznie z Lucky Losers i drabinką.${timed.length?' Czas meczu mierzymy od kliknięcia „Start meczu” do wpisania wyniku.':''}</p><div class="stats">${cards.join('')}</div></details>`;
 }
 
 function allResults(){
@@ -482,21 +502,41 @@ function roundSec(stage,compact){
   return compact?`<div style="margin-block:12px 20px">${head}${body}</div>`:`<section>${head}${body}</section>`;
 }
 
-function rankingSec(qual,compact){
-  const R=S.ranking, K=S.K, tie=new Set(S.tie||[]);
-  const sel=new Set(S.sel||[]);
+function tableSec(){
+  const R=S.ranking||[]; if(!R.length) return '';
+  const qual=S.phase==='qual', post=['ko','done'].includes(S.phase), pre=!qual&&!post;
+  const showStage=S.phase==='ll'||post;
+  const K=S.K, tie=new Set(S.tie||[]), sel=new Set(S.sel||[]);
   const D=S.D??K, LL=S.L??0;
-  const rows=R.map((r,i)=>{const inK=qual?sel.has(r.id):i<D;
-    return `<tr class="${!qual&&(i===D-1||(LL&&i===D+2*LL-1))?'cut':''} ${inK?'in':''} ${!qual&&i>=D&&i<D+2*LL?'llz':''} ${tie.has(r.id)?'tie':''} ${isMe(r.id)?'me':''}">
-    <td class="num">${i+1}</td><td>${esc(r.name)}${isMe(r.id)?youLbl():''}</td><td class="num">${r.played}</td><td class="num">${r.w}</td>
-    ${T()===1?`<td class="num">${r.pw}:${r.pl}</td><td class="num">${r.pw-r.pl>0?'+':''}${r.pw-r.pl}</td>`:`<td class="num">${r.sw}:${r.sl}</td><td class="num">${r.sw-r.sl>0?'+':''}${r.sw-r.sl}</td>`}
-    ${qual&&S.admin?`<td><input type="checkbox" aria-label="Awans: ${esc(r.name)}" data-sel="${r.id}" ${sel.has(r.id)?'checked':''}></td>`:qual?`<td>${sel.has(r.id)?'✓':''}</td>`:''}</tr>`}).join('');
-  const head=`<div class="sechead"><div><h2>${qual?'Awans do drabinki':'Ranking'}</h2><p class="sub">${qual?`Na granicy awansu jest remis (podświetlone wiersze). Organizator wybiera ${K} osób do drabinki.`:`${LL?`Miejsca 1–${D}: bezpośrednio do drabinki. Miejsca ${D+1}–${D+2*LL}: Lucky Losers, zwycięzcy ${LL} meczów dołączają do drabinki.${R.length>D+2*LL?' Pozostali kończą udział.':''}`:`Do drabinki wchodzi ${K} najlepszych.`} Kolejność: ${T()===1?'zwycięstwa, bilans punktów, zdobyte punkty':'zwycięstwa, bilans setów, bilans punktów'}.`}</p></div></div>`;
-  const tbl=`<div class="tablewrap"><table><thead><tr><th class="num">#</th><th>Zawodnik</th><th class="num">M</th><th class="num">Z</th><th class="num">${T()===1?'Punkty':'Sety'}</th><th class="num">+/−</th>${qual?'<th>Awans</th>':''}</tr></thead><tbody>${rows}</tbody></table></div>
-    ${!qual?`<div class="cutlabel">Przerywane linie: granica bezpośredniego awansu${LL?" i Lucky Losers":""}</div>`:''}
+  const idx={}; R.forEach((r,i)=>idx[r.id]=i);
+  const info={}; R.forEach(r=>info[r.id]={lvl:0,lbl:['r1','r2'].includes(S.phase)?'Kwalifikacje':'Runda 2'});
+  const llDone=(S.ll||[]).filter(m=>valid(m.sa,m.sb));
+  (S.ll||[]).forEach(m=>{[m.a,m.b].forEach(id=>{if(info[id]){info[id].lvl=5;info[id].lbl='Lucky Losers';}});});
+  (S.llDirect||[]).forEach(id=>{if(info[id]){info[id].lvl=6;info[id].lbl='Awans bezpośredni';}});
+  llDone.forEach(m=>{const w=winnerOf(m); if(info[w]){info[w].lvl=6;info[w].lbl='Awans z Lucky Losers';}});
+  if(S.ko){
+    const RR=S.ko.rounds, last=RR.length-1;
+    RR.forEach((r,ri)=>r.forEach(m=>[m.a,m.b].forEach(id=>{ if(id&&info[id]){ info[id].lvl=10+ri; info[id].lbl=S.phase==='done'?roundName(r.length).replace(/y$/,''):(ri===last?'Finał':roundName(r.length).replace(/y$/,'')); } })));
+    const f=RR[last][0], fw=winnerOf(f);
+    if(fw){ info[fw].lvl=10+last+1; info[fw].lbl='Zwycięzca'; const fl=fw===f.a?f.b:f.a; info[fl].lbl='Finał (2. miejsce)'; }
+    const th=S.ko.third, tw=th&&winnerOf(th);
+    if(tw){ const tl=tw===th.a?th.b:th.a; info[tw].lvl+=0.3; info[tw].lbl='3. miejsce'; info[tl].lvl+=0.1; info[tl].lbl='4. miejsce'; }
+  }
+  const rows=post?[...R].sort((a,b)=>info[b.id].lvl-info[a.id].lvl||idx[a.id]-idx[b.id]):R;
+  const body=rows.map((r,i)=>{
+    const inK=qual?sel.has(r.id):pre&&i<D;
+    const cls=[pre&&(i===D-1||(LL&&i===D+2*LL-1))?'cut':'', inK?'in':'', pre&&i>=D&&i<D+2*LL?'llz':'', tie.has(r.id)?'tie':'', isMe(r.id)?'me':''].join(' ');
+    const diff=T()===1?r.pw-r.pl:r.sw-r.sl;
+    return `<tr class="${cls}"><td class="num">${i+1}</td><td>${esc(r.name)}${isMe(r.id)?youLbl():''}</td>${showStage?`<td>${info[r.id].lbl}</td>`:''}<td class="num">${r.played}</td><td class="num">${r.w}</td><td class="num">${T()===1?`${r.pw}:${r.pl}`:`${r.sw}:${r.sl}`}</td><td class="num">${diff>0?'+':''}${diff}</td>${qual&&S.admin?`<td><input type="checkbox" aria-label="Awans: ${esc(r.name)}" data-sel="${r.id}" ${sel.has(r.id)?'checked':''}></td>`:qual?`<td>${sel.has(r.id)?'✓':''}</td>`:''}</tr>`;}).join('');
+  const order=T()===1?'zwycięstwa, bilans punktów, zdobyte punkty':'zwycięstwa, bilans setów, bilans punktów';
+  const sub=qual?`Na granicy awansu jest remis (podświetlone wiersze). Organizator wybiera ${K} osób do drabinki.`
+    :post?`Miejsca według etapu, do którego ktoś doszedł, a w obrębie etapu według rankingu z rund 1–2 (${order}). Mecze, zwycięstwa i punkty liczone z rund 1–2.`
+    :`${LL?`Miejsca 1–${D}: bezpośrednio do drabinki. Miejsca ${D+1}–${D+2*LL}: Lucky Losers, zwycięzcy ${LL} meczów dołączają do drabinki.${R.length>D+2*LL?' Pozostali kończą udział.':''}`:`Do drabinki wchodzi ${K} najlepszych.`} Kolejność: ${order}.`;
+  const head=`<div class="sechead"><div><h2>${qual?'Tabela: awans do drabinki':'Tabela'}</h2><p class="sub">${sub}</p></div></div>`;
+  return `<section>${head}<div class="tablewrap"><table><thead><tr><th class="num">#</th><th>Zawodnik</th>${showStage?'<th>Etap</th>':''}<th class="num">M</th><th class="num">Z</th><th class="num">${T()===1?'Punkty':'Sety'}</th><th class="num">+/−</th>${qual?'<th>Awans</th>':''}</tr></thead><tbody>${body}</tbody></table></div>
+    ${pre?`<div class="cutlabel">Przerywane linie: granica bezpośredniego awansu${LL?' i Lucky Losers':''}</div>`:''}
     ${qual&&S.admin?`<div class="actions" style="margin-top:12px"><span class="chip mono">${sel.size}/${K} wybranych</span><button class="btn" data-admin="startko" ${sel.size!==K?'disabled':''}>Uruchom drabinkę</button></div>`:''}
-    ${qual&&!S.admin?`<p class="notice warn" style="margin-top:12px">Czekamy na decyzję organizatora. Drabinka pojawi się tu automatycznie.</p>`:''}`;
-  return compact?`<div>${head}${tbl}</div>`:`<section>${head}${tbl}</section>`;
+    ${qual&&!S.admin?`<p class="notice warn" style="margin-top:12px">Czekamy na decyzję organizatora. Drabinka pojawi się tu automatycznie.</p>`:''}</section>`;
 }
 
 function roundName(n){return n===1?'Finał':n===2?'Półfinały':n===4?'Ćwierćfinały':`1/${n} finału`;}
@@ -541,7 +581,7 @@ function podium(){
 function adminPanel(){
   const p=S.phase; const dl=S.deadline?toLocalInput(S.deadline):'';
   const kOpts=[['','Automatycznie ('+S.K+')'],...[2,4,8,16,32].filter(k=>k<=Math.max(2,S.players.length)).map(k=>[k,k+' miejsc'])];
-  return `<section class="admin"><h2>Panel organizatora</h2>
+  return `<section class="admin">
   <p class="sub" style="margin:0">${S.demo?'W wersji demo jesteś organizatorem. Wszystko dzieje się w Twojej przeglądarce.':'Widzisz go tylko na urządzeniu, na którym otwarto link organizatora. Nie udostępniaj go dalej.'}</p>
   <form id="setf" class="grid2">
     <label class="f">Nazwa turnieju<input id="s_title" value="${esc(S.title)}" maxlength="120"></label>
@@ -570,9 +610,12 @@ function adminPanel(){
 }
 function toLocalInput(iso){const d=new Date(iso);const z=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`;}
 
-async function run(fn,okMsg){ if(busy) return; busy=true; try{const s=await fn(); if(s&&s.rev!==undefined){S=s;lastRev=s.rev;render();} if(okMsg) toast(okMsg);}catch(e){toast(e.message)} finally{busy=false} }
+async function run(fn,okMsg){ if(busy) return; busy=true; try{const s=await fn(); if(s&&s.rev!==undefined){S=s;lastRev=s.rev;render();} if(okMsg){ const a=$('#adm'); if(a&&a.open) a.close(); toast(okMsg); }}catch(e){toast(e.message)} finally{busy=false} }
 
 function bind(){
+  document.querySelectorAll('[data-adminopen]').forEach(b=>b.onclick=()=>$('#adm').showModal());
+  if(!bind.adm){ bind.adm=true; $('#admclose').onclick=()=>$('#adm').close(); $('#adm').addEventListener('click',e=>{ if(e.target===e.currentTarget) e.currentTarget.close(); }); }
+  document.querySelectorAll('details[data-stats]').forEach(d=>d.addEventListener('toggle',()=>{ statsOpen=d.open; }));
   document.querySelectorAll('[data-demo]').forEach(b=>b.onclick=()=>run(async()=>{
     const a=b.dataset.demo;
     if(a==='sim') return TTEngine.simulateStage();
@@ -603,6 +646,17 @@ function bind(){
 function findMatch(stage,id){ if(stage==='r1'||stage==='r2'||stage==='ll') return (S[stage]||[]).find(m=>m.id===id); if(stage==='ko') return S.ko.rounds.flat().find(m=>m.id===id); return S.ko.third; }
 function showDlg(html,onBind){ const f=$('#dlgform'); f.innerHTML=html; const d=$('#dlg'); dlgOpen=true; d.showModal(); onBind&&onBind(f); d.onclose=()=>{dlgOpen=false; refresh(true);}; }
 
+function timingRow(m){
+  const done=valid(m.sa,m.sb);
+  if(!done&&m.t0) return `<div class="timing"><span>▶ Mecz trwa od <b>${fmtClock(m.t0)}</b> (${fmtDur(Date.now()-Date.parse(m.t0))})</span><button type="button" class="ghost small" id="dunstart">Cofnij start</button></div>`;
+  if(!done) return `<div class="timing"><span>Zegar meczu: wpisanie wyniku zakończy pomiar.</span><button type="button" class="ghost small" id="dstart">▶ Start meczu</button></div>`;
+  const ms=matchMs(m); return ms!=null?`<div class="timing"><span>⏱ Czas meczu: <b>${fmtDur(ms)}</b> (${fmtClock(m.t0)}–${fmtClock(m.t1)})</span></div>`:'';
+}
+function bindTiming(stage,m){
+  const go=async(cancel,msg)=>{ try{ const s=await api('api/start',{stage,id:m.id,cancel}); S=s; lastRev=s.rev; $('#dlg').close(); toast(msg); }catch(e){ $('#derr').textContent=e.message; } };
+  const a=$('#dstart'); if(a) a.onclick=()=>go(false,'Start meczu zapisany.');
+  const b=$('#dunstart'); if(b) b.onclick=()=>go(true,'Start cofnięty.');
+}
 function openScore(stage,id){
   const m=findMatch(stage,id); if(!m) return; const t=T(); const opts=[];
   if(t===1) return openPoints(stage,m);
@@ -610,9 +664,10 @@ function openScore(stage,id){
   let pick=valid(m.sa,m.sb)?[m.sa,m.sb]:null;
   showDlg(`<h3>Wynik meczu</h3><div class="vs"><span>${esc(name(m.a))}</span><span>vs</span><span>${esc(name(m.b))}</span></div>
     <div class="opts">${opts.map(([a,b])=>`<button type="button" class="opt ${pick&&pick[0]===a&&pick[1]===b?'sel':''}" data-o="${a}-${b}"><b>${a} : ${b}</b><small>wygrywa ${esc(name(a>b?m.a:m.b))}</small></button>`).join('')}</div>
-    <div class="err" id="derr"></div>
+    ${timingRow(m)}<div class="err" id="derr"></div>
     <div class="row">${valid(m.sa,m.sb)?`<button type="button" class="ghost danger" id="dclr">Wyczyść wynik</button>`:''}<button type="button" class="ghost" id="dcan">Anuluj</button><button type="button" class="btn" id="dok" ${pick?'':'disabled'}>Zapisz wynik</button></div>`,
   f=>{
+    bindTiming(stage,m);
     f.querySelectorAll('[data-o]').forEach(b=>b.onclick=()=>{pick=b.dataset.o.split('-').map(Number); f.querySelectorAll('.opt').forEach(x=>x.classList.toggle('sel',x===b)); $('#dok').disabled=false;});
     $('#dcan').onclick=()=>$('#dlg').close();
     const send=async(sa,sb)=>{ try{ const s=await api('api/score',{stage,id,sa,sb}); S=s; lastRev=s.rev; $('#dlg').close(); toast(sa===null?'Wynik usunięty.':'Wynik zapisany.'); }catch(e){ $('#derr').textContent=e.message; } };
@@ -628,9 +683,10 @@ function openPoints(stage,m){
       <label class="f">${esc(name(m.b))}<input id="pb" type="number" inputmode="numeric" min="0" max="99" value="${has?m.pb:''}" style="font-size:1.6rem;font-family:var(--f-mono);text-align:center"></label>
     </div>
     <div class="actions" style="margin-top:10px"><button type="button" class="ghost small" id="qa">${esc(name(m.a))} 11</button><button type="button" class="ghost small" id="qb">${esc(name(m.b))} 11</button></div>
-    <div class="err" id="derr"></div>
+    ${timingRow(m)}<div class="err" id="derr"></div>
     <div class="row">${has?`<button type="button" class="ghost danger" id="dclr">Wyczyść wynik</button>`:''}<button type="button" class="ghost" id="dcan">Anuluj</button><button type="button" class="btn" id="dok">Zapisz wynik</button></div>`,
   f=>{
+    bindTiming(stage,m);
     $('#dcan').onclick=()=>$('#dlg').close();
     $('#qa').onclick=()=>{$('#pa').value=11; $('#pb').focus();};
     $('#qb').onclick=()=>{$('#pb').value=11; $('#pa').focus();};
@@ -649,7 +705,7 @@ function confirmBox(what){
     <button type="button" class="ghost" id="dcan">Anuluj</button>
     ${act==='reset'?`<button type="button" class="ghost danger" id="dok2">Wyczyść też zawodników</button><button type="button" class="btn" id="dok">Zachowaj zawodników</button>`:`<button type="button" class="btn" id="dok">Tak, cofnij</button>`}</div>`,
   f=>{ $('#dcan').onclick=()=>$('#dlg').close();
-    const go=async body=>{try{const s=await api('api/admin',body);S=s;lastRev=s.rev;$('#dlg').close();toast('Gotowe.');}catch(e){$('#derr').textContent=e.message}};
+    const go=async body=>{try{const s=await api('api/admin',body);S=s;lastRev=s.rev;$('#dlg').close();{const a=$('#adm'); if(a&&a.open) a.close();}toast('Gotowe.');}catch(e){$('#derr').textContent=e.message}};
     $('#dok').onclick=()=>go(act==='reset'?{action:'reset',keepPlayers:true}:act==='rollback'?{action:'rollback',to}:{action:'reopen'});
     const d2=$('#dok2'); if(d2) d2.onclick=()=>go({action:'reset',keepPlayers:false});
   });
