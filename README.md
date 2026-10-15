@@ -1,14 +1,16 @@
 # 🏓 Table Tennis Tournament
 
-A web app for running an office table-tennis tournament: sign-ups via a shared link, two qualifying rounds, a Lucky Losers round, a seeded knockout bracket, a podium with laurels, an overall table and stats.
+A web app for running an office table-tennis tournament: sign-ups via a shared link, two qualifying rounds, a Lucky Losers round, a seeded knockout bracket, a podium with laurels, one standings table with qualification cut-offs, a match timer and stats. The interface comes in Polish and English.
 
 **[▶ Open the demo](https://mr-powerbi-data.pl/table-tennis-tournament/)**: it runs in your browser, you are the organizer and you can play a whole tournament from sign-ups to the podium.
 
-![Podium and bracket](docs/screenshots/podium-desktop.png)
+![Podium and bracket](docs/screenshots/podium-en.png)
+
+*English interface. Every screenshot below exists in English and Polish.*
 
 > **Vibecoded.** The first working version was live about 20 minutes after the first prompt, built in a conversation with AI (Claude), and then went through a few quick iterations of fixes. It was made on the spot for a company team-building event, where close to 30 people signed up for a just-for-fun tournament. There was no design and no spec, only prompts in a chat. I dictated most of them by voice from my phone, and some features were added while the games were already being played. The process is described below.
 
-The app's interface is in Polish, because that's who it was built for. The documentation and code structure are described here in English.
+The app was built in Polish, because that's who it was built for, and later got an English version: a PL/EN switch sits in the top-right corner. The documentation and code structure are described here in English.
 
 ---
 
@@ -19,9 +21,12 @@ The app's interface is in Polish, because that's who it was built for. The docum
 - Live view: the page refreshes itself every few seconds.
 - Current stage, one combined standings table, bracket, podium, all results and a collapsible stats panel (right under the bracket).
 - Organizer panel opens as a pop-up from a button at the top, so there is no scrolling to the bottom.
+- A "How it works" button in the top bar jumps to the rules once the tournament has started (before that they are open at the top).
+- The standings table can show the final places or the rounds 1–2 ranking with the qualification cut-offs and a **Status** column: who is still in the tournament and who drops out at the current positions.
 - Polish and English UI: PL/EN switch in the top-right corner (defaults to the browser language, remembered per device, `?lang=en` forces a language). Server and engine messages are translated in the browser.
 - Match timer: the organizer taps *Start* on a match, entering the result ends it. Stats then show average, longest and shortest match time and how deuce games affect length.
 - Matches of the people signed up from your phone are highlighted.
+- Demo only: a **Random tournament** button creates and draws a tournament with a random number of players (6–32), match format (1–3 sets), bracket size and Lucky Losers spots, and the random results include the occasional long deuce game such as 15:13 or 18:16.
 
 **For the organizer (link with a secret token)**
 - Score entry in points (e.g. 11:7, 12:10), validated against the rules: first to 11, win by two.
@@ -40,9 +45,17 @@ The app's interface is in Polish, because that's who it was built for. The docum
 
 With an odd number of players, the player without a pair gets an extra match against a random opponent that only counts for them.
 
-| Round 2 on a phone (dark mode) | Entering a score |
+### Screenshots
+
+| English | Polski |
 |---|---|
-| ![Round 2 with the list of guaranteed qualifiers](docs/screenshots/round2-mobile-dark.png) | ![Score dialog](docs/screenshots/score-dialog-mobile.png) |
+| ![Podium and bracket](docs/screenshots/podium-en.png) | ![Podium i drabinka](docs/screenshots/podium-pl.png) |
+| ![Tournament stats](docs/screenshots/stats-en.png) | ![Statystyki turnieju](docs/screenshots/stats-pl.png) |
+| ![Standings with cut-offs and statuses](docs/screenshots/standings-en.png) | ![Tabela z progami i statusami](docs/screenshots/standings-pl.png) |
+
+| Round 2 on a phone (dark mode), EN | Round 2, PL | Score entry with the match timer, EN | Score entry, PL |
+|---|---|---|---|
+| ![Round 2 with the list of guaranteed qualifiers](docs/screenshots/round2-mobile-en.png) | ![Runda 2 z listą pewnych awansów](docs/screenshots/round2-mobile-pl.png) | ![Score dialog with the match timer](docs/screenshots/score-dialog-en.png) | ![Okno wyniku z zegarem meczu](docs/screenshots/score-dialog-pl.png) |
 
 ---
 
@@ -64,6 +77,20 @@ With an odd number of players, the player without a pair gets an extra match aga
 | 22:32 | Tournament stats at the end. |
 
 **In short: about 20 minutes to the first version online, then a few iterations of fixes**, mostly during the tournament, once it was clear what was missing.
+
+### Before going public
+
+The version that ran at the event was built for one evening and one company. Before the repository and the demo went public, a few things were fixed so that it could be shown to anyone:
+
+| Area | What was done before publishing |
+|---|---|
+| **Anonymisation** | All names in the demo tournament are made up. The repository, the code and the screenshots contain no real names, no company name and no address of the server it ran on. The organizer link stays secret: its token lives in the `#admin-…` part of the URL and is never stored in the repo. |
+| **Language versions** | An English interface next to the Polish one: PL/EN switch, browser language as the default, `?lang=en` to force a language, choice remembered per device. Every label, dialog, toast and stat card has both languages, server and engine messages are translated in the browser, and the default title, edition and prize are shown translated. The documentation is in English. |
+| **Better page layout** | One standings table instead of two, with a view for the qualification cut-offs and a Status column (who is still in, who drops out). Stats are collapsible and sit right under the bracket. The organizer panel is a pop-up behind a button, and a "How it works" button in the top bar replaces scrolling to the bottom. Stat cards, the floating buttons and the mobile layout were checked in a real browser. |
+| **Match timer and stats** | The organizer taps *Start* on a match and entering the result ends it. Stats show average, longest and shortest match time, deuce games, tight finishes and the biggest upset. Both the browser engine and the Python server do the same, and both have tests. |
+| **Demo** | The page works without a server on GitHub Pages. A *Random tournament* button generates a tournament of a random size and format, and 40 of 40 random tournaments were played through to the podium to check it. |
+| **Screenshots** | Retaken from the running app (headless Chrome, with seeded random results so they are reproducible): desktop and phone, light and dark, **in English and in Polish**. They only show the anonymised demo data. |
+| **Publishing** | GitHub Pages with a workflow that publishes `docs/` on every push, a custom domain, and a link preview (`og:` tags) for messaging apps. |
 
 ### Process
 - **A conversation instead of a spec.** There was no design and no backlog. Requirements came in consecutive, often dictated messages and changed as we saw how the tournament was going.
@@ -90,7 +117,7 @@ server/
 tests/           full-tournament simulations for both engines
 ```
 
-- **Server mode** (how it ran at the event): `server.py` keeps the state in a single JSON file and exposes a small API (`api/state`, `api/join`, `api/score`, `api/admin`). Organizer rights come from a token in the `#admin-…` part of the link, which never reaches server logs or the Referer header.
+- **Server mode** (how it ran at the event): `server.py` keeps the state in a single JSON file and exposes a small API (`api/state`, `api/join`, `api/leave`, `api/score`, `api/start`, `api/admin`). Organizer rights come from a token in the `#admin-…` part of the link, which never reaches server logs or the Referer header.
 - **Demo mode** (GitHub Pages): the same interface, but instead of the server it uses `engine.js`, a 1:1 port of the logic in `server.py`. The state is stored in the browser's `localStorage`.
 - The interface picks the mode by itself: on `github.io`, from a local file or with `?demo` it runs the demo. Otherwise it connects to the server, and if no server API answers (e.g. GitHub Pages on a custom domain), it falls back to the demo.
 
@@ -117,7 +144,7 @@ Both suites play full tournaments with random results for 3–40 players. They c
 
 ## Privacy
 
-The repository contains no real names, no company name and no address of the server the tournament ran on. The demo data is the real course of the tournament with made-up names.
+The repository contains no real names, no company name and no address of the server the tournament ran on, and neither do the screenshots. The demo data is the real course of the tournament with made-up names.
 
 ## License
 
