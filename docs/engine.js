@@ -452,7 +452,10 @@
     for (const [st, m] of todo) {
       if (stage === 'ko' && st === 'ko' && !s.ko.rounds[firstRound].includes(m)) continue;
       if (T === 1) {
-        const lose = Math.random() < 0.15 ? 10 + Math.floor(Math.random() * 3) : Math.floor(Math.random() * 10);
+        // ~15% meczów dochodzi do przewag (10:10); każda kolejna wymiana przedłuża grę z szansą ~45%,
+        // więc 12:10 jest częste, a 15:13 czy 18:16 zdarzają się rzadko, ale się zdarzają.
+        let lose;
+        if (Math.random() < 0.15) { lose = 10; while (lose < 40 && Math.random() < 0.45) lose++; } else lose = Math.floor(Math.random() * 10);
         const [pa, pb] = Math.random() < 0.5 ? [lose >= 10 ? lose + 2 : 11, lose] : [lose, lose >= 10 ? lose + 2 : 11];
         m.t0 = new Date(Date.now() - (5 + (pa + pb) * 0.5 + Math.random() * 6) * 60000).toISOString();
         setScore(s, st, m.id, null, null, pa, pb);
