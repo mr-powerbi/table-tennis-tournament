@@ -24,12 +24,14 @@ The app was built in Polish, because that's who it was built for, and later got 
 - A "How it works" button in the top bar jumps to the rules once the tournament has started (before that they are open at the top).
 - The standings table can show the final places or the rounds 1–2 ranking with the qualification cut-offs and a **Status** column: who is still in the tournament and who drops out at the current positions.
 - Polish and English UI: PL/EN switch in the top-right corner (defaults to the browser language, remembered per device, `?lang=en` forces a language). Server and engine messages are translated in the browser.
-- Match timer: the organizer taps *Start* on a match, entering the result ends it. Stats then show average, longest and shortest match time and how deuce games affect length.
+- Match timer: the organizer taps *Start* on a match, entering the result ends it. Stats then show average, longest and shortest match time and how deuce games affect length. With set points entered, stats also cover single sets (biggest and closest set, deuce sets) and match-level extras such as matches that went the distance, the comeback king and the best set difference.
 - Matches of the people signed up from your phone are highlighted.
 - Demo only: a **Random tournament** button creates and draws a tournament with a random number of players (6–32), match format (1–3 sets), bracket size and Lucky Losers spots, and the random results include the occasional long deuce game such as 15:13 or 18:16.
 
 **For the organizer (link with a secret token)**
-- Score entry in points (e.g. 11:7, 12:10), validated against the rules: first to 11, win by two.
+- Score entry validated against the rules (first to 11, win by two). Two modes, switchable in the organizer panel:
+  - **Points** (default): for one-set matches the points of the set (e.g. 11:7, 12:10); for matches played to 2 or 3 sets the points of **every set** (e.g. 11:9, 7:11, 12:10), and the match score (2:1) is worked out automatically. The form only shows another set row while the match is undecided.
+  - **Sets only** (faster): quick presets such as 2:0, 2:1, 1:2, 0:2 (for one set: just the winner). Point-based stats are then skipped, match-level stats still work.
 - Manual draw, or an automatic draw at a set time.
 - Adding late players during rounds 1 and 2, so they still get their two matches.
 - Rolling the tournament back to an earlier stage without losing earlier results.
@@ -56,6 +58,10 @@ With an odd number of players, the player without a pair gets an extra match aga
 | Round 2 on a phone (dark mode), EN | Round 2, PL | Score entry with the match timer, EN | Score entry, PL |
 |---|---|---|---|
 | ![Round 2 with the list of guaranteed qualifiers](docs/screenshots/round2-mobile-en.png) | ![Runda 2 z listą pewnych awansów](docs/screenshots/round2-mobile-pl.png) | ![Score dialog with the match timer](docs/screenshots/score-dialog-en.png) | ![Okno wyniku z zegarem meczu](docs/screenshots/score-dialog-pl.png) |
+
+| Match to 2 sets: points of every set (EN) | Mecz do 2 setów: punkty każdego seta (PL) |
+|---|---|
+| ![Entering the points of every set](docs/screenshots/sets-dialog-en.jpg) | ![Wpisywanie punktów każdego seta](docs/screenshots/sets-dialog-pl.jpg) |
 
 ---
 
@@ -87,7 +93,7 @@ The version that ran at the event was built for one evening and one company. Bef
 | **Anonymisation** | All names in the demo tournament are made up. The repository, the code and the screenshots contain no real names, no company name and no address of the server it ran on. The organizer link stays secret: its token lives in the `#admin-…` part of the URL and is never stored in the repo. |
 | **Language versions** | An English interface next to the Polish one: PL/EN switch, browser language as the default, `?lang=en` to force a language, choice remembered per device. Every label, dialog, toast and stat card has both languages, server and engine messages are translated in the browser, and the default title, edition and prize are shown translated. The documentation is in English. |
 | **Better page layout** | One standings table instead of two, with a view for the qualification cut-offs and a Status column (who is still in, who drops out). Stats are collapsible and sit right under the bracket. The organizer panel is a pop-up behind a button, and a "How it works" button in the top bar replaces scrolling to the bottom. Stat cards, the floating buttons and the mobile layout were checked in a real browser. |
-| **Match timer and stats** | The organizer taps *Start* on a match and entering the result ends it. Stats show average, longest and shortest match time, deuce games, tight finishes and the biggest upset. Both the browser engine and the Python server do the same, and both have tests. |
+| **Match timer, set scoring and stats** | The organizer taps *Start* on a match and entering the result ends it. Matches to 2 or 3 sets take the points of every set (11:9, 7:11, 12:10) and work out the match score themselves, or the organizer can choose the faster sets-only mode. Stats show match times, deuce games, tight finishes, the biggest upset, matches that went the distance and the comeback king. Both the browser engine and the Python server do the same, and both have tests. |
 | **Demo** | The page works without a server on GitHub Pages. A *Random tournament* button generates a tournament of a random size and format, and 40 of 40 random tournaments were played through to the podium to check it. |
 | **Screenshots** | Retaken from the running app (headless Chrome, with seeded random results so they are reproducible): desktop and phone, light and dark, **in English and in Polish**. They only show the anonymised demo data. |
 | **Publishing** | GitHub Pages with a workflow that publishes `docs/` on every push, a custom domain, and a link preview (`og:` tags) for messaging apps. |
