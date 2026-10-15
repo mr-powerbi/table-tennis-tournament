@@ -184,7 +184,9 @@ tr.out td{color:var(--muted)}
 .langsw{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--card);box-shadow:0 6px 20px rgba(0,0,0,.2)}
 .langsw button{appearance:none;border:0;background:transparent;color:var(--ink);font:inherit;font-weight:700;font-size:.8rem;padding:8px 11px;cursor:pointer}
 .langsw button[aria-pressed="true"]{background:var(--coral);color:var(--on-coral)}
-@media(max-width:480px){.topfix #admopen .long{display:none}}
+@media(max-width:480px){.topfix .long{display:none}}
+.topfix .ghost{background:var(--card);box-shadow:0 6px 20px rgba(0,0,0,.2)}
+#howto{scroll-margin-top:70px}
 dialog#adm{width:min(760px,calc(100% - 24px));max-height:calc(100dvh - 24px);overflow:auto}
 #adm .admhead{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 16px 0}
 #adm .admhead h2{font-size:1.2rem}
@@ -249,7 +251,7 @@ footer a{color:inherit}
 <main class="wrap" id="app"><p class="notice" id="loading">Ładowanie turnieju…</p></main>
 <footer class="wrap"><span class="live" id="live">Wyniki odświeżają się same</span> · <a href="https://github.com/mr-powerbi/table-tennis-tournament" rel="noopener" id="codelink">Kod na GitHubie</a></footer>
 
-<div class="topfix"><button type="button" class="btn small" id="admopen" hidden>⚙ <span class="long">Panel organizatora</span></button><div class="langsw" role="group" aria-label="Language / Język"><button type="button" data-lang="pl" aria-pressed="false">PL</button><button type="button" data-lang="en" aria-pressed="false">EN</button></div></div>
+<div class="topfix"><button type="button" class="ghost small" id="infobtn" hidden>ℹ <span class="long">Jak to działa</span></button><button type="button" class="btn small" id="admopen" hidden>⚙ <span class="long">Panel organizatora</span></button><div class="langsw" role="group" aria-label="Language / Język"><button type="button" data-lang="pl" aria-pressed="false">PL</button><button type="button" data-lang="en" aria-pressed="false">EN</button></div></div>
 <dialog id="dlg"><form method="dialog" class="dlg" id="dlgform"></form></dialog>
 <dialog id="adm" aria-label="Panel organizatora"><div class="admhead"><h2 id="admtitle">Panel organizatora</h2><button type="button" class="ghost small" id="admclose">Zamknij ✕</button></div><div id="admbody"></div></dialog>
 <div class="toast" id="toast" hidden></div>
@@ -328,6 +330,8 @@ function applyStatic(){
   $('#codelink').textContent=tr('Kod na GitHubie','Code on GitHub');
   const lo=$('#loading'); if(lo) lo.textContent=tr('Ładowanie turnieju…','Loading tournament…');
   $('#admopen .long').textContent=tr('Panel organizatora','Organizer panel');
+  $('#infobtn .long').textContent=tr('Jak to działa','How it works');
+  $('#infobtn').setAttribute('aria-label',tr('Jak to działa','How it works'));
   $('#admopen').setAttribute('aria-label',tr('Panel organizatora','Organizer panel'));
   $('#admtitle').textContent=tr('Panel organizatora','Organizer panel');
   $('#adm').setAttribute('aria-label',tr('Panel organizatora','Organizer panel'));
@@ -345,6 +349,22 @@ async function demoBoot(){
   if(TTEngine.hasState()) return;
   try{ const r=await fetch('demo-data.json'); TTEngine.loadState(await r.json()); }
   catch(e){ TTEngine.freshWithPlayers(DEMO_NAMES); }
+}
+const EXTRA_NAMES=['Michał S.','Natalia B.','Oskar D.','Weronika K.','Adrian L.','Julia P.','Dominik R.','Alicja M.','Sebastian T.','Magda Z.','Karol W.','Iza H.'];
+function randomTournament(){
+  const rnd=(a,b)=>a+Math.floor(Math.random()*(b-a+1));
+  const n=rnd(6,32), pool=[...DEMO_NAMES,...EXTRA_NAMES];
+  for(let i=pool.length-1;i>0;i--){ const j=rnd(0,i); [pool[i],pool[j]]=[pool[j],pool[i]]; }
+  TTEngine.freshWithPlayers(pool.slice(0,n));
+  const sets=[1,1,1,2,3][rnd(0,4)];
+  const ks=[2,4,8,16,32].filter(k=>k<=Math.max(2,n)&&k<n);
+  const settings={action:'settings',setsToWin:sets,koSize:Math.random()<.5||!ks.length?null:ks[rnd(0,ks.length-1)]};
+  try{ TTEngine.request('api/admin',settings); }catch(e){ TTEngine.request('api/admin',{action:'settings',setsToWin:sets}); }
+  const K=TTEngine.request('api/state').K, lls=[1,2,3,4,5,6,7,8].filter(v=>v<=Math.min(K,Math.max(1,n-K)));
+  if(lls.length&&Math.random()<.5){ try{ TTEngine.request('api/admin',{action:'settings',llSpots:lls[rnd(0,lls.length-1)]}); }catch(e){} }
+  const st=TTEngine.request('api/admin',{action:'draw'});
+  randomTournament.info={n,sets:st.setsToWin,K:st.K,L:st.L};
+  return st;
 }
 const DEMO_NAMES=['Norbert W.','Olek B.','Igor H.','Grzegorz L.','Szymon','Łukasz D.','Rafał T.','Kamil O.','Piotr Z.','Ewa W.','Kasia L.','Jan K.','Artur G.','Wiktor M.','Bartosz F.','Damian P.','Paweł N.','Robert J.','Ola R.','Hubert S.','Marek Ż.','Konrad E.','Zosia','Patryk B.','Tomek R.','Mateusz C.'];
 async function api(path,body){
@@ -414,6 +434,7 @@ function render(){
   if(!['ko','done'].includes(S.phase)) out.push(statsSec());
   out.push(howto());
   $('#admopen').hidden=!S.admin;
+  $('#infobtn').hidden=S.phase==='signup';
   const ad=$('#adm');
   if(!S.admin){ if(ad.open) ad.close(); $('#admbody').innerHTML=''; }
   else if(!(ad.open&&ad.contains(document.activeElement))) $('#admbody').innerHTML=adminPanel();
@@ -426,6 +447,7 @@ function demoBar(){
   return `<section class="demo"><div>${tr('<b>Wersja demo.</b> Aplikacja działa w Twojej przeglądarce, a Ty jesteś organizatorem: możesz wpisywać wyniki, cofać rundy i zaczynać od nowa. Przykładowy turniej to prawdziwy przebieg rozgrywek firmowych ze zmienionymi imionami.','<b>Demo version.</b> The app runs in your browser and you are the organizer: you can enter results, roll back rounds and start over. The sample tournament is a real company tournament with changed names.')}</div>
     <div class="actions">
       ${canSim?`<button class="btn small" data-demo="sim">${tr(`Rozegraj losowo ${S.phase==='ko'?'rundę drabinki':'bieżący etap'}`,`Play ${S.phase==='ko'?'the bracket round':'the current stage'} at random`)}</button>`:''}
+      <button class="ghost small" data-demo="random">${tr('Losowy turniej','Random tournament')}</button>
       <button class="ghost small" data-demo="fresh">${tr('Nowy turniej z zapisami','New tournament with sign-ups')}</button>
       <button class="ghost small" data-demo="sample">${tr('Wczytaj przykładowy turniej','Load the sample tournament')}</button>
     </div></section>`;
@@ -433,7 +455,7 @@ function demoBar(){
 
 function howto(){
   const prize=S.prize?esc(tx(S.prize)):'';
-  return `<details class="how" ${S.phase==='signup'?'open':''}><summary>${tr('Jak to działa','How it works')}</summary><ol>
+  return `<details class="how" id="howto" ${S.phase==='signup'?'open':''}><summary>${tr('Jak to działa','How it works')}</summary><ol>
   <li>${tr('<b>Zapisy.</b> Każdy, kto ma ten link, dopisuje siebie albo inne osoby, każdą osobno.','<b>Sign-ups.</b> Anyone with this link adds themselves or other people, one at a time.')}</li>
   <li>${tr('<b>Runda 1.</b> Losowanie par, wszyscy grają po jednym meczu.','<b>Round 1.</b> Pairs are drawn and everyone plays one match.')}</li>
   <li>${tr('<b>Runda 2.</b> Wygrani grają z wygranymi, przegrani z przegranymi. Każdy ma za sobą co najmniej dwa mecze.','<b>Round 2.</b> Winners play winners, losers play losers. Everyone has played at least two matches.')}</li>
@@ -726,15 +748,17 @@ function toLocalInput(iso){const d=new Date(iso);const z=n=>String(n).padStart(2
 async function run(fn,okMsg){ if(busy) return; busy=true; try{const s=await fn(); if(s&&s.rev!==undefined){S=s;lastRev=s.rev;render();} if(okMsg){ const a=$('#adm'); if(a&&a.open) a.close(); toast(okMsg); }}catch(e){toast(te(e.message))} finally{busy=false} }
 
 function bind(){
-  if(!bind.adm){ bind.adm=true; $('#admopen').onclick=()=>$('#adm').showModal(); $('#admclose').onclick=()=>$('#adm').close(); $('#adm').addEventListener('click',e=>{ if(e.target===e.currentTarget) e.currentTarget.close(); }); }
+  if(!bind.adm){ bind.adm=true; $('#infobtn').onclick=()=>{ const d=$('#howto'); if(!d) return; d.open=true; scrollTo(0,d.getBoundingClientRect().top+scrollY-70); }; $('#admopen').onclick=()=>$('#adm').showModal(); $('#admclose').onclick=()=>$('#adm').close(); $('#adm').addEventListener('click',e=>{ if(e.target===e.currentTarget) e.currentTarget.close(); }); }
   document.querySelectorAll('[data-tview]').forEach(b=>b.onclick=()=>{ tblView=b.dataset.tview; render(); });
   document.querySelectorAll('details[data-stats]').forEach(d=>d.addEventListener('toggle',()=>{ statsOpen=d.open; }));
   document.querySelectorAll('[data-demo]').forEach(b=>b.onclick=()=>run(async()=>{
     const a=b.dataset.demo;
     if(a==='sim') return TTEngine.simulateStage();
     if(a==='fresh') return TTEngine.freshWithPlayers(DEMO_NAMES);
+    if(a==='random'){ const st=randomTournament(), i=randomTournament.info;
+      toast(tr(`Losowy turniej: ${i.n} osób, ${i.sets===1?'1 set':`mecz do ${i.sets} wygranych setów`}, drabinka na ${i.K} miejsc.`,`Random tournament: ${i.n} players, ${i.sets===1?'single set':`first to ${i.sets} sets`}, bracket of ${i.K}.`)); return st; }
     const r=await fetch('demo-data.json'); return TTEngine.loadState(await r.json());
-  },{sim:tr('Wyniki wylosowane.','Results drawn at random.'),fresh:tr('Nowy turniej: 26 osób na liście, zamknij zapisy w panelu organizatora.','New tournament: 26 people on the list, close sign-ups in the organizer panel.'),sample:tr('Wczytano przykładowy turniej.','Sample tournament loaded.')}[b.dataset.demo]));
+  },{sim:tr('Wyniki wylosowane.','Results drawn at random.'),fresh:tr('Nowy turniej: 26 osób na liście, zamknij zapisy w panelu organizatora.','New tournament: 26 people on the list, close sign-ups in the organizer panel.'),random:'',sample:tr('Wczytano przykładowy turniej.','Sample tournament loaded.')}[b.dataset.demo]));
   const jf=$('#joinf'); if(jf) jf.addEventListener('submit',e=>{e.preventDefault(); const n=$('#jname').value;
     run(async()=>{const s=await api('api/join',{name:n}); mine.push({id:s.me,token:s.token}); LS.set('tt_mine',mine); return s;},tr('Dopisano: ','Added: ')+n.trim()).then(()=>{const i=$('#jname'); if(i) i.focus();});});
   document.querySelectorAll('[data-leave]').forEach(b=>b.onclick=()=>{const e=mine.find(x=>x.id===b.dataset.leave); if(!e) return; run(async()=>{const s=await api('api/leave',e); mine=mine.filter(x=>x.id!==e.id); LS.set('tt_mine',mine); return s;},tr('Wypisano z turnieju.','Removed from the tournament.'));});
