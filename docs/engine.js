@@ -33,7 +33,7 @@
 
   function newState() {
     return {
-      title: DEFAULT_TITLE, edition: 'Edycja 2026', prize: '', setsToWin: 1,
+      title: DEFAULT_TITLE, edition: 'Edycja 2026', prize: '', setsToWin: 1, scoreMode: 'points',
       koSize: null, llSpots: null, deadline: null, phase: 'signup', players: [],
       r1: [], r2: [], ll: [], llDirect: [], sel: null, ko: null, rev: 0, updated: now(),
     };
@@ -136,7 +136,7 @@
 
   function setp(m, a, b) {
     if (m.a !== a || m.b !== b) {
-      Object.assign(m, { a, b, sa: null, sb: null, pa: null, pb: null });
+      Object.assign(m, { a, b, sa: null, sb: null, pa: null, pb: null, sets: null });
       delete m.t0; delete m.t1;
     }
   }
@@ -225,13 +225,40 @@
   const STAGE_PHASE = { r1: ['r1'], r2: ['r2'], ll: ['ll'], ko: ['ko', 'done'], third: ['ko', 'done'] };
   const pointsOk = (pa, pb) => [pa, pb].every((v) => isInt(v) && v >= 0 && v <= 99) && Math.max(pa, pb) >= 11 && Math.abs(pa - pb) >= 2;
 
-  function setScore(s, stage, id, sa, sb, pa = null, pb = null) {
+  // Mecz do kilku setów: wpisuje się punkty każdego seta, wynik meczu (np. 2:1) liczy się z nich.
+  function scoreSets(sets, T) {
+    const tooMany = () => new Err(`Za dużo setów: mecz kończy się, gdy ktoś wygra ${T} sety.`);
+    if (sets.length > 2 * T - 1) throw tooMany();
+    let wa = 0, wb = 0, pa = 0, pb = 0; const out = [];
+    for (const st of sets) {
+      if (!Array.isArray(st) || st.length !== 2 || !pointsOk(st[0], st[1])) throw new Err('Wpisz punkty każdego seta: zwycięzca ma co najmniej 11 i 2 punkty przewagi (np. 11:9, 12:10).');
+      if (wa === T || wb === T) throw tooMany();
+      if (st[0] > st[1]) wa++; else wb++;
+      pa += st[0]; pb += st[1]; out.push([st[0], st[1]]);
+    }
+    if (wa !== T && wb !== T) throw new Err(`Mecz nie jest rozstrzygnięty: zwycięzca musi wygrać ${T} sety.`);
+    return { sa: wa, sb: wb, pa, pb, sets: out };
+  }
+
+  function setScore(s, stage, id, sa, sb, pa = null, pb = null, sets = null) {
     const T = s.setsToWin;
-    if (pa !== null && pa !== undefined || pb !== null && pb !== undefined) {
-      if (!pointsOk(pa, pb)) throw new Err('Wpisz punkty seta: zwycięzca ma co najmniej 11 i 2 punkty przewagi (np. 11:7, 12:10).');
-      if (T !== 1) throw new Err('Punkty wpisuje się przy meczu do jednego seta.');
-      [sa, sb] = pa > pb ? [1, 0] : [0, 1];
-    } else { pa = null; pb = null; }
+    let setList = null;
+    if (Array.isArray(sets) && sets.length) {
+      if (T === 1) {
+        if (sets.length !== 1) throw new Err('Mecz do jednego seta ma jeden wynik.');
+        [pa, pb] = sets[0];
+      } else {
+        const r = scoreSets(sets, T);
+        ({ sa, sb, pa, pb } = r); setList = r.sets;
+      }
+    }
+    if (setList === null) {
+      if (pa !== null && pa !== undefined || pb !== null && pb !== undefined) {
+        if (!pointsOk(pa, pb)) throw new Err('Wpisz punkty seta: zwycięzca ma co najmniej 11 i 2 punkty przewagi (np. 11:7, 12:10).');
+        if (T !== 1) throw new Err('Przy meczu do kilku setów wpisz punkty każdego seta.');
+        [sa, sb] = pa > pb ? [1, 0] : [0, 1];
+      } else { pa = null; pb = null; }
+    }
     if (!STAGE_PHASE[stage]) throw new Err('Nieznany etap.');
     const m = findMatch(s, stage, id);
     if (!(m.a && m.b)) throw new Err('W tym meczu nie ma jeszcze obu zawodników.');
@@ -242,7 +269,7 @@
       const newW = clearing ? null : sa > sb ? m.a : m.b;
       if (oldW !== newW) throw new Err('Ta zmiana zmienia zwycięzcę zamkniętej rundy. Najpierw cofnij turniej do tej rundy w panelu organizatora.');
     }
-    Object.assign(m, clearing ? { sa: null, sb: null, pa: null, pb: null } : { sa, sb, pa, pb });
+    Object.assign(m, clearing ? { sa: null, sb: null, pa: null, pb: null, sets: null } : { sa, sb, pa, pb, sets: setList });
     // Czas meczu: start zapisuje organizator, wpisanie wyniku jest końcem.
     if (clearing) { delete m.t0; delete m.t1; } else if (m.t0 && !m.t1) m.t1 = now();
     if (stage === 'ko' || stage === 'third') propagate(s); else advance(s);
@@ -303,6 +330,10 @@
           s.llSpots = v;
           if (s.phase === 'll') startLl(s);
         }
+      }
+      if ('scoreMode' in body) {
+        if (!['points', 'sets'].includes(body.scoreMode)) throw new Err('Nieznany tryb wpisywania wyników.');
+        s.scoreMode = body.scoreMode;
       }
       if ('deadline' in body) {
         if (body.deadline && isNaN(Date.parse(body.deadline))) throw new Err('Błędna data.');
@@ -409,7 +440,7 @@
         if (!p || p.tok !== String(body.token || '')) throw new Err('Nie możesz wypisać tej osoby.');
         s.players = s.players.filter((x) => x !== p);
       } else if (path === 'api/score') {
-        setScore(s, body.stage, body.id, body.sa, body.sb, body.pa, body.pb);
+        setScore(s, body.stage, body.id, body.sa, body.sb, body.pa, body.pb, body.sets);
       } else if (path === 'api/start') {
         startMatch(s, body.stage, body.id, !!body.cancel);
       } else if (path === 'api/admin') {
@@ -442,6 +473,7 @@
     if (!load()) return null;
     const s = clone(load());
     const T = s.setsToWin;
+    const pointsMode = (s.scoreMode || 'points') === 'points';
     const stage = { r1: 'r1', r2: 'r2', ll: 'll', ko: 'ko' }[s.phase];
     if (!stage) throw new Error('Na tym etapie nie ma meczów do rozegrania.');
     const pool = stage === 'ko' ? [...s.ko.rounds.flat().map((m) => ['ko', m]), ...(s.ko.third ? [['third', s.ko.third]] : [])] : s[stage].map((m) => [stage, m]);
@@ -458,12 +490,24 @@
         if (Math.random() < 0.15) { lose = 10; while (lose < 40 && Math.random() < 0.45) lose++; } else lose = Math.floor(Math.random() * 10);
         const [pa, pb] = Math.random() < 0.5 ? [lose >= 10 ? lose + 2 : 11, lose] : [lose, lose >= 10 ? lose + 2 : 11];
         m.t0 = new Date(Date.now() - (5 + (pa + pb) * 0.5 + Math.random() * 6) * 60000).toISOString();
-        setScore(s, st, m.id, null, null, pa, pb);
+        if (pointsMode) setScore(s, st, m.id, null, null, pa, pb);
+        else setScore(s, st, m.id, pa > pb ? 1 : 0, pa > pb ? 0 : 1);
       } else {
         const l = Math.floor(Math.random() * T);
-        const [sa, sb] = Math.random() < 0.5 ? [T, l] : [l, T];
-        m.t0 = new Date(Date.now() - (8 + Math.random() * 25) * 60000).toISOString();
-        setScore(s, st, m.id, sa, sb);
+        const aWins = Math.random() < 0.5;
+        // kolejność setów: zwycięzca meczu wygrywa ostatni, przegrany ma l setów wcześniej
+        const order = Array(T - 1).fill(true).concat(Array(l).fill(false));
+        for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+        order.push(true);
+        const sets = order.map((winWins) => {
+          let lose = Math.random() < 0.15 ? 10 : Math.floor(Math.random() * 10);
+          if (lose === 10) while (lose < 40 && Math.random() < 0.45) lose++;
+          const win = lose >= 10 ? lose + 2 : 11;
+          return (winWins === aWins) ? [win, lose] : [lose, win];
+        });
+        m.t0 = new Date(Date.now() - (8 + sets.length * 6 + Math.random() * 10) * 60000).toISOString();
+        if (pointsMode) setScore(s, st, m.id, null, null, null, null, sets);
+        else setScore(s, st, m.id, aWins ? T : l, aWins ? l : T);
       }
     }
     save(s);

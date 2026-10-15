@@ -170,6 +170,17 @@ tr.me td{font-weight:800}
 details.statsbox .stats{margin-bottom:16px}
 .match .ticking{color:var(--coral-deep);font-weight:700}
 .timing{margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:.92rem}
+.setgrid{display:grid;gap:8px;margin:12px 0 4px}
+.setrow{display:grid;grid-template-columns:3.4em 1fr auto 1fr;gap:8px;align-items:center}
+.setrow[hidden]{display:none}
+.setrow.head{font-weight:700;font-size:.85rem;color:var(--muted)}
+.setrow.head b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
+.setrow input{width:100%;box-sizing:border-box;font-family:var(--f-mono);font-size:1.3rem;text-align:center;padding:10px 6px}
+.setrow .sn{color:var(--muted);font-size:.78rem;font-weight:700}
+.setrow .sep{color:var(--muted);font-weight:700}
+.setsum{font-weight:800;margin-top:8px;min-height:1.4em}
+.setpts{font-family:var(--f-body);font-size:.74rem;color:var(--muted);font-weight:400;white-space:nowrap}
+.match .setsnote{grid-column:1/-1;font-size:.78rem;color:var(--muted);margin-top:2px;font-family:var(--f-mono)}
 .stt{font-size:.82rem;font-weight:700;white-space:nowrap}
 .st-in{color:var(--win)}
 .st-ll{color:var(--coral)}
@@ -317,8 +328,12 @@ const ERR_EN={
 'Błędne dane.':'Invalid data.',
 'Brak uprawnień organizatora.':'Organizer permission required.',
 'Serwer nie odpowiada. Spróbuj za chwilę.':'The server is not responding. Try again shortly.',
-'Coś poszło nie tak.':'Something went wrong.'};
-const ERR_RE=[[/^Mecz gramy do (\d+) wygranych setów\. Sprawdź wynik\.$/,'A match is first to $1 sets. Check the result.'],[/^Wybierz dokładnie (\d+) zawodników\.$/,'Select exactly $1 players.']];
+'Coś poszło nie tak.':'Something went wrong.',
+'Mecz do jednego seta ma jeden wynik.':'A single-set match has one result.',
+'Wpisz punkty każdego seta: zwycięzca ma co najmniej 11 i 2 punkty przewagi (np. 11:9, 12:10).':'Enter the points of every set: the winner needs at least 11 and a 2-point lead (e.g. 11:9, 12:10).',
+'Przy meczu do kilku setów wpisz punkty każdego seta.':'In a multi-set match enter the points of every set.',
+'Nieznany tryb wpisywania wyników.':'Unknown score entry mode.'};
+const ERR_RE=[[/^Za dużo setów: mecz kończy się, gdy ktoś wygra (\d+) sety\.$/,'Too many sets: the match ends when someone wins $1 sets.'],[/^Mecz nie jest rozstrzygnięty: zwycięzca musi wygrać (\d+) sety\.$/,'The match is not decided: the winner needs $1 sets.'],[/^Mecz gramy do (\d+) wygranych setów\. Sprawdź wynik\.$/,'A match is first to $1 sets. Check the result.'],[/^Wybierz dokładnie (\d+) zawodników\.$/,'Select exactly $1 players.']];
 const te=m=>{ m=String(m||''); if(LANG==='pl') return m; if(ERR_EN[m]) return ERR_EN[m]; for(const [re,t] of ERR_RE) if(re.test(m)) return m.replace(re,t); return m; };
 const stg=k=>({r1:tr('Runda 1','Round 1'),r2:tr('Runda 2','Round 2'),ll:'Lucky Losers',third:tr('O 3. miejsce','3rd place match')})[k];
 function applyStatic(){
@@ -358,7 +373,7 @@ function randomTournament(){
   TTEngine.freshWithPlayers(pool.slice(0,n));
   const sets=[1,1,1,2,3][rnd(0,4)];
   const ks=[2,4,8,16,32].filter(k=>k<=Math.max(2,n)&&k<n);
-  const settings={action:'settings',setsToWin:sets,koSize:Math.random()<.5||!ks.length?null:ks[rnd(0,ks.length-1)]};
+  const settings={action:'settings',setsToWin:sets,scoreMode:Math.random()<.65?'points':'sets',koSize:Math.random()<.5||!ks.length?null:ks[rnd(0,ks.length-1)]};
   try{ TTEngine.request('api/admin',settings); }catch(e){ TTEngine.request('api/admin',{action:'settings',setsToWin:sets}); }
   const K=TTEngine.request('api/state').K, lls=[1,2,3,4,5,6,7,8].filter(v=>v<=Math.min(K,Math.max(1,n-K)));
   if(lls.length&&Math.random()<.5){ try{ TTEngine.request('api/admin',{action:'settings',llSpots:lls[rnd(0,lls.length-1)]}); }catch(e){} }
@@ -490,8 +505,9 @@ function matchBtn(m,stage,opts={}){
   else if(!done&&canEdit) extra=`<span class="cta">${tr('Wpisz wynik','Enter result')}</span>`;
   else if(!done&&ready&&mine) extra=`<span class="note">${tr('Twój mecz. Po grze podaj wynik organizatorowi.','Your match. Tell the organizer the result after playing.')}</span>`;
   const live=!done&&ready&&m.t0?`<span class="note ticking">🏓 ${tr('W grze od','Playing since')} ${fmtClock(m.t0)}</span>`:'';
+  const setsTag=done&&Array.isArray(m.sets)?`<span class="setsnote">${m.sets.map(x=>x[0]+':'+x[1]).join(' · ')}</span>`:'';
   const ms=done?matchMs(m):null, durTag=ms!=null?`<span class="note">⏱ ${fmtDur(ms)}</span>`:'';
-  return `<button type="button" class="match ${mine?'mine':''} ${canEdit?'':'locked'}" ${canEdit?`data-score="${stage}:${m.id}"`:'tabindex="-1"'} aria-label="${ready?esc(name(m.a)+tr(' kontra ',' vs ')+name(m.b)):tr('Mecz w oczekiwaniu','Match pending')}">${pl(m.a,pts?m.pa:m.sa)}${pl(m.b,pts?m.pb:m.sb)}${live}${extra}${durTag}</button>`;
+  return `<button type="button" class="match ${mine?'mine':''} ${canEdit?'':'locked'}" ${canEdit?`data-score="${stage}:${m.id}"`:'tabindex="-1"'} aria-label="${ready?esc(name(m.a)+tr(' kontra ',' vs ')+name(m.b)):tr('Mecz w oczekiwaniu','Match pending')}">${pl(m.a,pts?m.pa:m.sa)}${pl(m.b,pts?m.pb:m.sb)}${setsTag}${live}${extra}${durTag}</button>`;
 }
 
 function qualBox(){
@@ -533,58 +549,85 @@ function statsSec(){
   const add=(ms,l)=>(ms||[]).forEach(m=>{ if(m.a&&m.b&&valid(m.sa,m.sb)) all.push([l,m]); });
   add(S.r1,stg('r1')); add(S.r2,stg('r2')); add(S.ll,stg('ll'));
   if(S.ko){ S.ko.rounds.forEach(r=>add(r,roundName(r.length,true))); if(S.ko.third) add([S.ko.third],stg('third')); }
-  const seq=T()===1?all.filter(([,m])=>m.pa!=null):[];
+  const multi=T()>1;
+  // jednostki punktowe: cały mecz (do 1 seta) albo każdy set osobno (mecze do kilku setów)
+  const seq=[];
+  all.forEach(([l,m])=>{
+    if(!multi){ if(m.pa!=null) seq.push([l,m]); }
+    else if(Array.isArray(m.sets)) m.sets.forEach((st,i)=>seq.push([`${l} · ${tr('set','set')} ${i+1}`,{a:m.a,b:m.b,half:m.half,pa:st[0],pb:st[1]}]));
+  });
   const timed=all.map(([l,m])=>[l,m,matchMs(m)]).filter(x=>x[2]!=null);
   const card=(k,v,w,d,hot)=>`<div class="stat ${hot?'hot':''}"><div class="k">${k}</div><div class="v">${v}</div>${w?`<div class="w">${w}</div>`:''}${d?`<div class="d">${d}</div>`:''}</div>`;
   const pts=n=>pn(n,['punkt','punkty','punktów'],['point','points']);
+  const unitN=n=>multi?pn(n,['set','sety','setów'],['set','sets']):pn(n,['mecz','mecze','meczów'],['match','matches']);
+  const scoreStr=m=>Array.isArray(m.sets)?m.sets.map(x=>x[0]+':'+x[1]).join(', '):(!multi&&m.pa!=null?Math.max(m.pa,m.pb)+':'+Math.min(m.pa,m.pb):`${Math.max(m.sa,m.sb)}:${Math.min(m.sa,m.sb)}`);
   const cards=[];
-  if(seq.length>=3){
-    const tot=seq.reduce((s,[,m])=>s+m.pa+m.pb,0);
-    const diff=m=>Math.abs(m.pa-m.pb), sum=m=>m.pa+m.pb;
-    const txt=([l,m])=>{const w=winnerOf(m),lo=w===m.a?m.b:m.a,hi=Math.max(m.pa,m.pb),lw=Math.min(m.pa,m.pb);return {w:`${esc(name(w))} – ${esc(name(lo))}`,d:`${hi}:${lw} · ${l}`};};
-    const pick=(f,cmp)=>seq.reduce((b,x)=>b===null||cmp(f(x[1]),f(b[1]),x,b)?x:b,null);
-    const blow=pick(diff,(a,b)=>a>b), close=pick(m=>m.pa+m.pb,(a,b,x,y)=>diff(x[1])<diff(y[1])||(diff(x[1])===diff(y[1])&&a>b)), longest=pick(sum,(a,b)=>a>b);
-    const deuce=seq.filter(([,m])=>Math.max(m.pa,m.pb)>11).length, zeros=seq.filter(([,m])=>Math.min(m.pa,m.pb)===0).length;
-    const dT=timed.filter(x=>x[1].pa!=null&&Math.max(x[1].pa,x[1].pb)>11), nT=timed.filter(x=>x[1].pa!=null&&Math.max(x[1].pa,x[1].pb)<=11);
-    const avgOf=a=>a.reduce((s,x)=>s+x[2],0)/a.length;
-    const deuceNote=dT.length&&nT.length?tr(` Średnio ${fmtDur(avgOf(dT))} wobec ${fmtDur(avgOf(nT))} w pozostałych.`,` Average ${fmtDur(avgOf(dT))} vs ${fmtDur(avgOf(nT))} in the others.`):'';
-    const P={}; const pl=id=>P[id]||(P[id]={id,pf:0,pa:0,w:0,n:0,run:0,best:0});
-    seq.forEach(([,m])=>{ const sides=m.half?[['a','b']]:[['a','b'],['b','a']];
-      sides.forEach(([me,op])=>{const x=pl(m[me]); const mine=me==='a'?m.pa:m.pb, th=me==='a'?m.pb:m.pa; x.pf+=mine; x.pa+=th; x.n++; if(mine>th){x.w++;x.run++;x.best=Math.max(x.best,x.run);} else x.run=0;}); });
-    const ps=Object.values(P);
-    const top=(f,min=1)=>ps.filter(x=>x.n>=min).sort((a,b)=>f(b)-f(a)||b.w-a.w)[0];
-    const mostPts=top(x=>x.pf), bestBal=top(x=>x.pf-x.pa), mostW=top(x=>x.w), streak=top(x=>x.best), wall=top(x=>-x.pa/x.n,2);
-    const b=txt(blow), c=txt(close), lg=txt(longest);
-    const R=S.ranking||[], idx={}; R.forEach((r,i)=>idx[r.id]=i);
-    let up=null; seq.forEach(([l,m])=>{ const w=winnerOf(m), lo=w===m.a?m.b:m.a; if(idx[w]==null||idx[lo]==null) return; const gap=idx[w]-idx[lo]; if(gap>0&&(!up||gap>up.gap)) up={gap,w,lo,l,m}; });
-    const tight=seq.filter(([,m])=>diff(m)===2).length;
-    const matchesN=n=>pn(n,['mecz','mecze','meczów'],['match','matches']);
-    cards.push(card(tr('Rozegrane mecze','Matches played'),seq.length,'',tr(`${tot} ${pts(tot)}, średnio ${(tot/seq.length).toFixed(1)} na mecz`,`${tot} ${pts(tot)}, ${(tot/seq.length).toFixed(1)} per match on average`)));
-    cards.push(card(tr('Najwyższe zwycięstwo','Biggest win'),b.d.split(' · ')[0],b.w,b.d.split(' · ')[1],true));
-    cards.push(card(tr('Najbardziej zacięty mecz','Closest match'),c.d.split(' · ')[0],c.w,c.d.split(' · ')[1]));
-    cards.push(card(tr('Najdłuższy mecz (punkty)','Longest match (points)'),lg.d.split(' · ')[0],lg.w,`${sum(longest[1])} ${pts(sum(longest[1]))} · ${lg.d.split(' · ')[1]}`));
+  // ----- poziom meczu (działa zawsze, także gdy wpisywano tylko wyniki w setach) -----
+  const M={}; const mp=id=>M[id]||(M[id]={id,w:0,n:0,run:0,best:0,sw:0,sl:0,cb:0});
+  let full=0, comebacks=0;
+  all.forEach(([,m])=>{
+    const w=winnerOf(m);
+    const sides=m.half?[['a','b']]:[['a','b'],['b','a']];
+    sides.forEach(([me,op])=>{ const x=mp(m[me]); x.n++; x.sw+=me==='a'?m.sa:m.sb; x.sl+=me==='a'?m.sb:m.sa; if(m[me]===w){x.w++;x.run++;x.best=Math.max(x.best,x.run);} else x.run=0; });
+    if(multi&&Math.min(m.sa,m.sb)===T()-1) full++;
+    if(multi&&Array.isArray(m.sets)&&m.sets.length>1){ const fw=m.sets[0][0]>m.sets[0][1]?m.a:m.b; if(fw!==w){ comebacks++; mp(w).cb++; } }
+  });
+  const mps=Object.values(M);
+  const topM=(f,min=1)=>mps.filter(x=>x.n>=min).sort((a,b)=>f(b)-f(a)||b.w-a.w)[0];
+  const mostW=topM(x=>x.w), streak=topM(x=>x.best), setBal=multi?topM(x=>x.sw-x.sl):null, cbKing=multi&&comebacks?topM(x=>x.cb):null;
+  const R=S.ranking||[], idx={}; R.forEach((r,i)=>idx[r.id]=i);
+  let up=null; all.forEach(([l,m])=>{ const w=winnerOf(m), lo=w===m.a?m.b:m.a; if(idx[w]==null||idx[lo]==null) return; const gap=idx[w]-idx[lo]; if(gap>0&&(!up||gap>up.gap)) up={gap,w,lo,l,m}; });
+  const pointsTotal=seq.reduce((s,[,m])=>s+m.pa+m.pb,0);
+  if(all.length>=3){
+    cards.push(card(tr('Rozegrane mecze','Matches played'),all.length,'',seq.length?tr(`${pointsTotal} ${pts(pointsTotal)} w ${seq.length} ${unitN(seq.length)}, średnio ${(pointsTotal/seq.length).toFixed(1)} na ${multi?'set':'mecz'}`,`${pointsTotal} ${pts(pointsTotal)} in ${seq.length} ${unitN(seq.length)}, ${(pointsTotal/seq.length).toFixed(1)} per ${multi?'set':'match'} on average`):(multi?tr(`${all.reduce((s,[,m])=>s+m.sa+m.sb,0)} rozegranych setów`,`${all.reduce((s,[,m])=>s+m.sa+m.sb,0)} sets played`):'')));
     cards.push(card(tr('Najwięcej zwycięstw','Most wins'),mostW.w,esc(name(mostW.id)),tr(`na ${mostW.n} ${plural(mostW.n,'mecz','mecze','meczów')}`,`from ${mostW.n} ${mostW.n===1?'match':'matches'}`),true));
     cards.push(card(tr('Najdłuższa seria zwycięstw','Longest winning streak'),streak.best,esc(name(streak.id)),tr('meczów z rzędu','matches in a row')));
-    cards.push(card(tr('Najwięcej zdobytych punktów','Most points scored'),mostPts.pf,esc(name(mostPts.id)),tr(`w ${mostPts.n} ${plural(mostPts.n,'meczu','meczach','meczach')}`,`in ${mostPts.n} ${mostPts.n===1?'match':'matches'}`)));
+    if(multi){
+      cards.push(card(tr('Najlepszy bilans setów','Best set difference'),(setBal.sw-setBal.sl>0?'+':'')+(setBal.sw-setBal.sl),esc(name(setBal.id)),`${setBal.sw}:${setBal.sl} ${tr('w setach','in sets')}`,true));
+      cards.push(card(tr('Mecze na pełnym dystansie','Matches going the distance'),full,'',tr(`rozstrzygnięte dopiero w ostatnim, decydującym secie (${Math.round(100*full/all.length)}% meczów)`,`decided only in the final set (${Math.round(100*full/all.length)}% of matches)`)));
+      if(cbKing&&cbKing.cb) cards.push(card(tr('Król powrotów','Comeback king'),cbKing.cb,esc(name(cbKing.id)),tr(`${cbKing.cb===1?'mecz wygrany':'meczów wygranych'} mimo przegranego 1. seta (łącznie ${comebacks} w turnieju)`,`${cbKing.cb===1?'match':'matches'} won after losing the 1st set (${comebacks} in the whole tournament)`)));
+    }
+    if(up&&up.gap>=3) cards.push(card(tr('Największa niespodzianka','Biggest upset'),tr(`${up.gap} ${plural(up.gap,'miejsce','miejsca','miejsc')}`,`${up.gap} ${up.gap===1?'place':'places'}`),tr(`${esc(name(up.w))} pokonuje ${esc(name(up.lo))}`,`${esc(name(up.w))} beats ${esc(name(up.lo))}`),tr(`#${idx[up.w]+1} wygrywa z #${idx[up.lo]+1} · ${scoreStr(up.m)} · ${up.l}`,`#${idx[up.w]+1} beats #${idx[up.lo]+1} · ${scoreStr(up.m)} · ${up.l}`),true));
+  }
+  // ----- poziom punktów (gdy wpisywano punkty) -----
+  if(seq.length>=3){
+    const diff=m=>Math.abs(m.pa-m.pb), sum=m=>m.pa+m.pb, wp=m=>m.pa>m.pb?m.a:m.b;
+    const txt=([l,m])=>{const w=wp(m),lo=w===m.a?m.b:m.a,hi=Math.max(m.pa,m.pb),lw=Math.min(m.pa,m.pb);return {w:`${esc(name(w))} – ${esc(name(lo))}`,d:`${hi}:${lw} · ${l}`};};
+    const pick=(f,cmp)=>seq.reduce((b,x)=>b===null||cmp(f(x[1]),f(b[1]),x,b)?x:b,null);
+    const blow=pick(diff,(a,b)=>a>b), close=pick(m=>m.pa+m.pb,(a,b,x,y)=>diff(x[1])<diff(y[1])||(diff(x[1])===diff(y[1])&&a>b)), longest=pick(sum,(a,b)=>a>b);
+    const deuce=seq.filter(([,m])=>Math.max(m.pa,m.pb)>11).length, zeros=seq.filter(([,m])=>Math.min(m.pa,m.pb)===0).length, tight=seq.filter(([,m])=>diff(m)===2).length;
+    const dT=timed.filter(x=>!multi&&x[1].pa!=null&&Math.max(x[1].pa,x[1].pb)>11), nT=timed.filter(x=>!multi&&x[1].pa!=null&&Math.max(x[1].pa,x[1].pb)<=11);
+    const avgOf=a=>a.reduce((s,x)=>s+x[2],0)/a.length;
+    const deuceNote=dT.length&&nT.length?tr(` Średnio ${fmtDur(avgOf(dT))} wobec ${fmtDur(avgOf(nT))} w pozostałych.`,` Average ${fmtDur(avgOf(dT))} vs ${fmtDur(avgOf(nT))} in the others.`):'';
+    const P={}; const pl=id=>P[id]||(P[id]={id,pf:0,pa:0,k:0});
+    seq.forEach(([,m])=>{ const sides=m.half?[['a','b']]:[['a','b'],['b','a']];
+      sides.forEach(([me])=>{const x=pl(m[me]); x.pf+=me==='a'?m.pa:m.pb; x.pa+=me==='a'?m.pb:m.pa; x.k++;}); });
+    const ps=Object.values(P);
+    const top=(f,min=1)=>ps.filter(x=>x.k>=min).sort((a,b)=>f(b)-f(a))[0];
+    const mostPts=top(x=>x.pf), bestBal=top(x=>x.pf-x.pa), wall=top(x=>-x.pa/x.k,2);
+    const b=txt(blow), c=txt(close), lg=txt(longest);
+    cards.push(card(multi?tr('Najwyższy set','Biggest set win'):tr('Najwyższe zwycięstwo','Biggest win'),b.d.split(' · ')[0],b.w,b.d.split(' · ').slice(1).join(' · '),true));
+    cards.push(card(multi?tr('Najbardziej zacięty set','Closest set'):tr('Najbardziej zacięty mecz','Closest match'),c.d.split(' · ')[0],c.w,c.d.split(' · ').slice(1).join(' · ')));
+    cards.push(card(multi?tr('Najdłuższy set (punkty)','Longest set (points)'):tr('Najdłuższy mecz (punkty)','Longest match (points)'),lg.d.split(' · ')[0],lg.w,`${sum(longest[1])} ${pts(sum(longest[1]))} · ${lg.d.split(' · ').slice(1).join(' · ')}`));
+    cards.push(card(tr('Najwięcej zdobytych punktów','Most points scored'),mostPts.pf,esc(name(mostPts.id)),tr(`w ${mostPts.k} ${multi?plural(mostPts.k,'secie','setach','setach'):plural(mostPts.k,'meczu','meczach','meczach')}`,`in ${mostPts.k} ${unitN(mostPts.k)}`)));
     cards.push(card(tr('Najlepszy bilans punktów','Best point difference'),(bestBal.pf-bestBal.pa>0?'+':'')+(bestBal.pf-bestBal.pa),esc(name(bestBal.id)),`${bestBal.pf}:${bestBal.pa}`));
-    if(wall) cards.push(card(tr('Najszczelniejsza obrona','Tightest defence'),(wall.pa/wall.n).toFixed(1),esc(name(wall.id)),tr('traconych punktów na mecz','points conceded per match')));
-    cards.push(card(tr('Gra na przewagi','Deuce games'),deuce,'',tr(`${plural(deuce,'mecz skończył','mecze skończyły','meczów skończyło')} się po 10:10.`,`${deuce===1?'match went':'matches went'} past 10:10.`)+deuceNote));
-    if(tight) cards.push(card(tr('Mecze na styku','Tight finishes'),tight,'',tr(`wygrane różnicą dokładnie 2 punktów (${Math.round(100*tight/seq.length)}% meczów)`,`won by exactly 2 points (${Math.round(100*tight/seq.length)}% of matches)`)));
-    if(up&&up.gap>=3){ const hi=Math.max(up.m.pa,up.m.pb), lw=Math.min(up.m.pa,up.m.pb); cards.push(card(tr('Największa niespodzianka','Biggest upset'),tr(`${up.gap} ${plural(up.gap,'miejsce','miejsca','miejsc')}`,`${up.gap} ${up.gap===1?'place':'places'}`),tr(`${esc(name(up.w))} pokonuje ${esc(name(up.lo))}`,`${esc(name(up.w))} beats ${esc(name(up.lo))}`),tr(`#${idx[up.w]+1} wygrywa z #${idx[up.lo]+1} · ${hi}:${lw} · ${up.l}`,`#${idx[up.w]+1} beats #${idx[up.lo]+1} · ${hi}:${lw} · ${up.l}`),true)); }
-    if(zeros) cards.push(card(tr('Do zera','Shutouts'),zeros,'',tr(`${plural(zeros,'mecz','mecze','meczów')} 11:0`,`${zeros===1?'match':'matches'} won 11:0`)));
+    if(wall) cards.push(card(tr('Najszczelniejsza obrona','Tightest defence'),(wall.pa/wall.k).toFixed(1),esc(name(wall.id)),tr(`traconych punktów na ${multi?'set':'mecz'}`,`points conceded per ${multi?'set':'match'}`)));
+    cards.push(card(tr('Gra na przewagi','Deuce games'),deuce,'',tr(`${multi?plural(deuce,'set skończył','sety skończyły','setów skończyło'):plural(deuce,'mecz skończył','mecze skończyły','meczów skończyło')} się po 10:10.`,`${unitN(deuce)} went past 10:10.`)+deuceNote));
+    if(tight) cards.push(card(multi?tr('Sety na styku','Tight sets'):tr('Mecze na styku','Tight finishes'),tight,'',tr(`wygrane różnicą dokładnie 2 punktów (${Math.round(100*tight/seq.length)}% ${multi?'setów':'meczów'})`,`won by exactly 2 points (${Math.round(100*tight/seq.length)}% of ${unitN(2)})`)));
+    if(zeros) cards.push(card(tr('Do zera','Shutouts'),zeros,'',tr(`${multi?plural(zeros,'set','sety','setów'):plural(zeros,'mecz','mecze','meczów')} 11:0`,`${unitN(zeros)} won 11:0`)));
   }
   if(timed.length){
     const tot=timed.reduce((s,x)=>s+x[2],0);
     const lg=timed.reduce((b,x)=>x[2]>b[2]?x:b), sh=timed.reduce((b,x)=>x[2]<b[2]?x:b);
     const nm=([,m])=>{ const w=winnerOf(m); return `${esc(name(w))} – ${esc(name(w===m.a?m.b:m.a))}`; };
-    const sc=([l,m])=>`${m.pa!=null?Math.max(m.pa,m.pb)+':'+Math.min(m.pa,m.pb)+' · ':''}${l}`;
+    const sc=([l,m])=>`${scoreStr(m)} · ${l}`;
     cards.push(card(tr('Średni czas meczu','Average match time'),fmtDur(tot/timed.length),'',tr(`z ${timed.length} ${plural(timed.length,'zmierzonego meczu','zmierzonych meczów','zmierzonych meczów')}`,`from ${timed.length} timed ${timed.length===1?'match':'matches'}`),true));
     cards.push(card(tr('Najdłuższy mecz (czas)','Longest match (time)'),fmtDur(lg[2]),nm(lg),sc(lg)));
     if(timed.length>1) cards.push(card(tr('Najkrótszy mecz (czas)','Shortest match (time)'),fmtDur(sh[2]),nm(sh),sc(sh)));
     cards.push(card(tr('Łącznie przy stole','Total time at the table'),fmtDur(tot),'',tr('suma czasu zmierzonych meczów','sum of the timed matches')));
   }
   if(!cards.length) return '';
-  return `<details class="how statsbox" data-stats ${statsOpen?'open':''}><summary>${tr('Statystyki turnieju','Tournament stats')}</summary><p class="sub" style="margin:0 0 12px">${tr('Liczone ze wszystkich rozegranych meczów, łącznie z Lucky Losers i drabinką.','Calculated from all matches played, including Lucky Losers and the bracket.')}${timed.length?tr(' Czas meczu mierzymy od kliknięcia „Start meczu” do wpisania wyniku.',' Match time runs from tapping “Start match” to entering the result.'):''}</p><div class="stats">${cards.join('')}</div></details>`;
+  return `<details class="how statsbox" data-stats ${statsOpen?'open':''}><summary>${tr('Statystyki turnieju','Tournament stats')}</summary><p class="sub" style="margin:0 0 12px">${tr('Liczone ze wszystkich rozegranych meczów, łącznie z Lucky Losers i drabinką.','Calculated from all matches played, including Lucky Losers and the bracket.')}${multi&&seq.length?tr(' Mecze do kilku setów: statystyki punktowe liczone z każdego seta osobno.',' Multi-set matches: point stats are calculated from every set separately.'):''}${timed.length?tr(' Czas meczu mierzymy od kliknięcia „Start meczu” do wpisania wyniku.',' Match time runs from tapping “Start match” to entering the result.'):''}</p><div class="stats">${cards.join('')}</div></details>`;
 }
 
 function allResults(){
@@ -594,7 +637,7 @@ function allResults(){
   if(S.ko){ S.ko.rounds.forEach(r=>add(r,roundName(r.length,true))); if(S.ko.third) add([S.ko.third],stg('third')); }
   const sc=(m,side)=>T()===1&&m.pa!=null?(side==='a'?m.pa:m.pb):(side==='a'?m.sa:m.sb);
   const body=rows.length?rows.map(([l,m])=>{const w=winnerOf(m);return `<tr><td>${l}${m.half?` <span class="n" title="${tr('Mecz uzupełniający','Extra match')}">*</span>`:''}</td>
-    <td style="${w===m.a?'font-weight:800':''}">${esc(name(m.a))}</td><td class="num">${sc(m,'a')} : ${sc(m,'b')}</td><td style="${w===m.b?'font-weight:800':''}">${esc(name(m.b))}</td></tr>`}).join('')
+    <td style="${w===m.a?'font-weight:800':''}">${esc(name(m.a))}</td><td class="num">${sc(m,'a')} : ${sc(m,'b')}${Array.isArray(m.sets)?`<div class="setpts">${m.sets.map(x=>x[0]+':'+x[1]).join(' · ')}</div>`:''}</td><td style="${w===m.b?'font-weight:800':''}">${esc(name(m.b))}</td></tr>`}).join('')
     :`<tr><td colspan="4" style="color:var(--muted)">${tr('Jeszcze nie ma wyników.','No results yet.')}</td></tr>`;
   return `<section><div class="sechead"><div><h2>${tr('Wszystkie wyniki','All results')}</h2><p class="sub">${tr('Każdy rozegrany mecz turnieju, od rundy 1.','Every match played in the tournament, from round 1.')}${rows.some(([,m])=>m.half)?tr(' Gwiazdka: mecz uzupełniający, liczony tylko dla pierwszego gracza.',' Asterisk: extra match, counted only for the first player.'):''}</p></div><span class="chip mono">${rows.length} ${pn(rows.length,['mecz','mecze','meczów'],['match','matches'])}</span></div>
     <div class="tablewrap"><table><thead><tr><th>${tr('Etap','Stage')}</th><th>${tr('Gracz','Player')}</th><th class="num">${tr('Wynik','Result')}</th><th>${tr('Gracz','Player')}</th></tr></thead><tbody>${body}</tbody></table></div></section>`;
@@ -713,6 +756,7 @@ function podium(){
 
 function adminPanel(){
   const p=S.phase; const dl=S.deadline?toLocalInput(S.deadline):'';
+  const mode=S.scoreMode||'points';
   const auto=n=>tr('Automatycznie','Automatic')+' ('+n+')';
   const kOpts=[['',auto(S.K)],...[2,4,8,16,32].filter(k=>k<=Math.max(2,S.players.length)).map(k=>[k,k+' '+tr('miejsc','places')])];
   const llOpts=[['',auto(Math.max(1,Math.floor(S.K/4)))],...[1,2,3,4,5,6,7,8].filter(v=>v<=Math.min(S.K,Math.max(1,S.players.length-S.K))).map(v=>[v,v+' '+tr('(gra '+(2*v)+' najlepszych spoza awansu)','(the best '+(2*v)+' outside direct qualification play)')])];
@@ -723,6 +767,7 @@ function adminPanel(){
     <label class="f">${tr('Edycja','Edition')}<input id="s_ed" value="${esc(S.edition)}" maxlength="60"></label>
     <label class="f">${tr('Nagroda (opcjonalnie)','Prize (optional)')}<input id="s_prize" value="${esc(S.prize||'')}" maxlength="80" placeholder="${tr('np. puchar i wieczna chwała','e.g. trophy and eternal glory')}"></label>
     <label class="f">${tr('Mecz do wygranych setów','Sets to win a match')}<select id="s_sets" ${p!=='signup'?'disabled':''}>${[1,2,3].map(v=>`<option value="${v}" ${v===T()?'selected':''}>${v}</option>`).join('')}</select></label>
+    <label class="f">${tr('Wpisywanie wyników','Score entry')}<select id="s_mode"><option value="points" ${mode==='points'?'selected':''}>${T()===1?tr('Punkty seta','Set points'):tr('Punkty każdego seta','Points of every set')}</option><option value="sets" ${mode==='sets'?'selected':''}>${T()===1?tr('Tylko zwycięzca (szybciej)','Winner only (faster)'):tr('Tylko wynik w setach (szybciej)','Sets only (faster)')}</option></select></label>
     <label class="f">${tr('Miejsca w drabince','Bracket places')}<select id="s_k" ${['ko','done'].includes(p)?'disabled':''}>${kOpts.map(([v,l])=>`<option value="${v}" ${String(S.koSize||'')===String(v)?'selected':''}>${l}</option>`).join('')}</select></label>
     <label class="f">${tr('Miejsca dla Lucky Losers','Lucky Losers places')}<select id="s_ll" ${['ko','done'].includes(p)?'disabled':''}>${llOpts.map(([v,l])=>`<option value="${v}" ${String(S.llSpots||'')===String(v)?'selected':''}>${l}</option>`).join('')}</select></label>
     <label class="f">${tr('Automatyczne losowanie o','Automatic draw at')}<input id="s_dl" type="datetime-local" value="${dl}" ${p!=='signup'?'disabled':''}></label>
@@ -770,7 +815,7 @@ function bind(){
   document.querySelectorAll('[data-confirm]').forEach(b=>b.onclick=()=>confirmBox(b.dataset.confirm));
   document.querySelectorAll('[data-rename]').forEach(b=>b.onclick=()=>renameBox(b.dataset.rename));
   const sf=$('#setf'); if(sf) sf.addEventListener('submit',e=>{e.preventDefault();
-    const dlv=$('#s_dl').value; const body={action:'settings',title:$('#s_title').value,edition:$('#s_ed').value,prize:$('#s_prize').value};
+    const dlv=$('#s_dl').value; const body={action:'settings',title:$('#s_title').value,edition:$('#s_ed').value,prize:$('#s_prize').value,scoreMode:$('#s_mode').value};
     if(!$('#s_k').disabled) body.koSize=$('#s_k').value||null;
     if(!$('#s_ll').disabled) body.llSpots=$('#s_ll').value||null;
     if(!$('#s_sets').disabled) body.setsToWin=+$('#s_sets').value;
@@ -794,9 +839,49 @@ function bindTiming(stage,m){
   const a=$('#dstart'); if(a) a.onclick=()=>go(false,tr('Start meczu zapisany.','Match start recorded.'));
   const b=$('#dunstart'); if(b) b.onclick=()=>go(true,tr('Start cofnięty.','Start undone.'));
 }
+function openSets(stage,m){
+  const t=T(), max=2*t-1, have=Array.isArray(m.sets)?m.sets:[];
+  const inp=(i,k)=>`<input type="number" inputmode="numeric" min="0" max="99" data-set="${i}:${k}" value="${have[i]?have[i][k]:''}" aria-label="${esc(name(k?m.b:m.a))}, ${tr('set','set')} ${i+1}">`;
+  const rows=Array.from({length:max},(_,i)=>`<div class="setrow" data-row="${i}" ${i<Math.max(t,have.length)?'':'hidden'}><span class="sn">${tr('Set','Set')} ${i+1}</span>${inp(i,0)}<span class="sep">:</span>${inp(i,1)}</div>`).join('');
+  showDlg(`<h3>${tr('Wynik meczu','Match result')}</h3>
+    <p class="sub">${tr(`Wpisz punkty każdego seta (do 11, przy 10:10 do dwóch punktów przewagi). Mecz kończy się, gdy ktoś wygra ${t} sety, a wynik w setach policzy się sam.`,`Enter the points of every set (to 11; from 10:10 you need a two-point lead). The match ends when someone wins ${t} sets and the set score is worked out for you.`)}</p>
+    <div class="setgrid"><div class="setrow head"><span></span><b>${esc(name(m.a))}</b><span></span><b>${esc(name(m.b))}</b></div>${rows}</div>
+    <div class="setsum" id="setsum"></div>
+    ${timingRow(m)}<div class="err" id="derr"></div>
+    <div class="row">${valid(m.sa,m.sb)?`<button type="button" class="ghost danger" id="dclr">${tr('Wyczyść wynik','Clear result')}</button>`:''}<button type="button" class="ghost" id="dcan">${tr('Anuluj','Cancel')}</button><button type="button" class="btn" id="dok" disabled>${tr('Zapisz wynik','Save result')}</button></div>`,
+  f=>{
+    bindTiming(stage,m);
+    const val=(i,k)=>{ const v=f.querySelector(`[data-set="${i}:${k}"]`).value; return v===''?null:parseInt(v,10); };
+    const good=(x,y)=>Number.isInteger(x)&&Number.isInteger(y)&&x>=0&&y>=0&&Math.max(x,y)>=11&&Math.abs(x-y)>=2;
+    let list=[];
+    const calc=()=>{
+      let wa=0,wb=0,decided=false; list=[];
+      for(let i=0;i<max;i++){
+        const row=f.querySelector(`[data-row="${i}"]`);
+        row.hidden=!(i<t||(!decided&&list.length===i));
+        if(row.hidden){ row.querySelectorAll('input').forEach(x=>x.value=''); continue; }
+        const x=val(i,0), y=val(i,1);
+        if(!decided&&list.length===i&&good(x,y)){ list.push([x,y]); if(x>y) wa++; else wb++; if(wa===t||wb===t) decided=true; }
+      }
+      const sum=$('#setsum');
+      sum.textContent=!list.length?'':decided?`${tr('Wynik','Result')}: ${wa} : ${wb} · ${tr('wygrywa','winner:')} ${name(wa>wb?m.a:m.b)}`:`${tr('Stan setów','Sets so far')}: ${wa} : ${wb}`;
+      $('#dok').disabled=!decided;
+    };
+    f.querySelectorAll('[data-set]').forEach(el=>el.addEventListener('input',e=>{
+      calc();
+      const [i,k]=el.dataset.set.split(':').map(Number);
+      if(k===1&&good(val(i,0),val(i,1))){ const nx=f.querySelector(`[data-row="${i+1}"]:not([hidden]) input`); if(nx&&nx.value==='') nx.focus(); }
+    }));
+    $('#dcan').onclick=()=>$('#dlg').close();
+    $('#dok').onclick=async()=>{ try{ const s=await api('api/score',{stage,id:m.id,sets:list}); S=s; lastRev=s.rev; $('#dlg').close(); toast(tr('Wynik zapisany.','Result saved.')); }catch(e){ $('#derr').textContent=te(e.message); } };
+    const c=$('#dclr'); if(c) c.onclick=async()=>{ try{ const s=await api('api/score',{stage,id:m.id,sa:null,sb:null}); S=s; lastRev=s.rev; $('#dlg').close(); toast(tr('Wynik usunięty.','Result removed.')); }catch(e){ $('#derr').textContent=te(e.message); } };
+    calc();
+    setTimeout(()=>{ const first=[...f.querySelectorAll('[data-set]')].find(x=>!x.closest('[hidden]')&&x.value===''); if(first) first.focus(); },50);
+  });
+}
 function openScore(stage,id){
   const m=findMatch(stage,id); if(!m) return; const t=T(); const opts=[];
-  if(t===1) return openPoints(stage,m);
+  if((S.scoreMode||'points')==='points') return t===1?openPoints(stage,m):openSets(stage,m);
   for(let l=0;l<t;l++) opts.push([t,l]); for(let l=t-1;l>=0;l--) opts.push([l,t]);
   let pick=valid(m.sa,m.sb)?[m.sa,m.sb]:null;
   showDlg(`<h3>${tr('Wynik meczu','Match result')}</h3><div class="vs"><span>${esc(name(m.a))}</span><span>vs</span><span>${esc(name(m.b))}</span></div>

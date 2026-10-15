@@ -26,7 +26,7 @@ def now():
 
 
 def new_state():
-    return {"title": DEFAULT_TITLE, "edition": "Edycja 2026", "prize": "", "setsToWin": 1,
+    return {"title": DEFAULT_TITLE, "edition": "Edycja 2026", "prize": "", "setsToWin": 1, "scoreMode": "points",
             "koSize": None, "llSpots": None, "deadline": None, "phase": "signup", "players": [],
             "r1": [], "r2": [], "ll": [], "llDirect": [], "sel": None, "ko": None, "rev": 0, "updated": now()}
 
@@ -199,6 +199,7 @@ def build_ko(s, ordered):
 def setp(m, a, b):
     if m["a"] != a or m["b"] != b:
         m["a"], m["b"], m["sa"], m["sb"], m["pa"], m["pb"] = a, b, None, None, None, None
+        m["sets"] = None
         m.pop("t0", None)
         m.pop("t1", None)
 
@@ -312,14 +313,47 @@ def points_ok(pa, pb):
     return max(pa, pb) >= 11 and abs(pa - pb) >= 2
 
 
-def set_score(s, stage, m_id, sa, sb, admin, pa=None, pb=None):
+def score_sets(sets, T):
+    """Mecz do kilku setów: wpisuje się punkty każdego seta, wynik meczu (np. 2:1) liczy się z nich."""
+    too_many = f"Za dużo setów: mecz kończy się, gdy ktoś wygra {T} sety."
+    if len(sets) > 2 * T - 1:
+        raise Err(too_many)
+    wa = wb = pa = pb = 0
+    out = []
+    for st in sets:
+        if not (isinstance(st, list) and len(st) == 2 and points_ok(st[0], st[1])):
+            raise Err("Wpisz punkty każdego seta: zwycięzca ma co najmniej 11 i 2 punkty przewagi (np. 11:9, 12:10).")
+        if wa == T or wb == T:
+            raise Err(too_many)
+        if st[0] > st[1]:
+            wa += 1
+        else:
+            wb += 1
+        pa += st[0]
+        pb += st[1]
+        out.append([st[0], st[1]])
+    if wa != T and wb != T:
+        raise Err(f"Mecz nie jest rozstrzygnięty: zwycięzca musi wygrać {T} sety.")
+    return wa, wb, pa, pb, out
+
+
+def set_score(s, stage, m_id, sa, sb, admin, pa=None, pb=None, sets=None):
     T = s["setsToWin"]
-    if pa is not None or pb is not None:
-        if not points_ok(pa, pb):
-            raise Err("Wpisz punkty seta: zwycięzca ma co najmniej 11 i 2 punkty przewagi (np. 11:7, 12:10).")
-        if T != 1:
-            raise Err("Punkty wpisuje się przy meczu do jednego seta.")
-        sa, sb = (1, 0) if pa > pb else (0, 1)
+    set_list = None
+    if isinstance(sets, list) and sets:
+        if T == 1:
+            if len(sets) != 1 or not (isinstance(sets[0], list) and len(sets[0]) == 2):
+                raise Err("Mecz do jednego seta ma jeden wynik.")
+            pa, pb = sets[0]
+        else:
+            sa, sb, pa, pb, set_list = score_sets(sets, T)
+    if set_list is None:
+        if pa is not None or pb is not None:
+            if not points_ok(pa, pb):
+                raise Err("Wpisz punkty seta: zwycięzca ma co najmniej 11 i 2 punkty przewagi (np. 11:7, 12:10).")
+            if T != 1:
+                raise Err("Przy meczu do kilku setów wpisz punkty każdego seta.")
+            sa, sb = (1, 0) if pa > pb else (0, 1)
     if not admin:
         raise Err("Wyniki wpisuje tylko organizator.")
     if stage not in STAGE_PHASE:
@@ -343,6 +377,7 @@ def set_score(s, stage, m_id, sa, sb, admin, pa=None, pb=None):
             raise Err("Ta zmiana zmienia zwycięzcę zamkniętej rundy. Najpierw cofnij turniej do tej rundy w panelu organizatora.")
     m["sa"], m["sb"] = (None, None) if clearing else (sa, sb)
     m["pa"], m["pb"] = (None, None) if clearing else (pa, pb)
+    m["sets"] = None if clearing else set_list
     # Czas meczu: start zapisuje organizator, wpisanie wyniku jest końcem.
     if clearing:
         m.pop("t0", None)
@@ -412,6 +447,10 @@ def admin_action(s, body):
             s["llSpots"] = v
             if s["phase"] == "ll":
                 start_ll(s)
+        if "scoreMode" in body:
+            if body["scoreMode"] not in ("points", "sets"):
+                raise Err("Nieznany tryb wpisywania wyników.")
+            s["scoreMode"] = body["scoreMode"]
         if "deadline" in body:
             d = body["deadline"]
             if d:
@@ -622,7 +661,7 @@ class H(BaseHTTPRequestHandler):
                     s["players"].remove(p)
                 elif path == "/api/score":
                     sa, sb = body.get("sa"), body.get("sb")
-                    set_score(s, body.get("stage"), body.get("id"), sa, sb, admin, body.get("pa"), body.get("pb"))
+                    set_score(s, body.get("stage"), body.get("id"), sa, sb, admin, body.get("pa"), body.get("pb"), body.get("sets"))
                 elif path == "/api/start":
                     if not admin:
                         return self.send(403, {"error": "Brak uprawnień organizatora."})

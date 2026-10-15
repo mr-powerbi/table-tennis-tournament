@@ -125,5 +125,65 @@ class TournamentTest(unittest.TestCase):
         self.assertNotIn("t1", m)
 
 
+    def test_multi_set_match_from_set_points(self):
+        s = new_tournament(4, setsToWin=2)
+        m = s["r1"][0]
+        S.set_score(s, "r1", m["id"], None, None, True, None, None, [[11, 9], [5, 11], [11, 8]])
+        self.assertEqual((m["sa"], m["sb"]), (2, 1))
+        self.assertEqual((m["pa"], m["pb"]), (27, 28), "points are the sum of all sets")
+        self.assertEqual(m["sets"], [[11, 9], [5, 11], [11, 8]])
+        S.set_score(s, "r1", m["id"], None, None, True, None, None, [[11, 3], [12, 10]])
+        self.assertEqual((m["sa"], m["sb"]), (2, 0))
+        S.set_score(s, "r1", m["id"], None, None, True)
+        self.assertIsNone(m["sets"])
+        self.assertIsNone(m["sa"])
+
+    def test_multi_set_validation(self):
+        s = new_tournament(4, setsToWin=2)
+        m = s["r1"][0]
+        for bad in ([[11, 9]],                      # nobody has won yet
+                    [[11, 9], [11, 3], [11, 5]],      # a set after the match was decided
+                    [[11, 10], [11, 3]],              # a set needs a two-point lead
+                    [[11, 9], [9, 11], [11, 9], [11, 9]]):  # more sets than possible
+            with self.subTest(sets=bad):
+                with self.assertRaises(S.Err):
+                    S.set_score(s, "r1", m["id"], None, None, True, None, None, bad)
+        with self.assertRaises(S.Err):  # single-set points are refused when playing to two sets
+            S.set_score(s, "r1", m["id"], None, None, True, 11, 3)
+
+    def test_sets_only_result_still_works(self):
+        s = new_tournament(4, setsToWin=2)
+        m = s["r1"][0]
+        S.set_score(s, "r1", m["id"], 2, 1, True)
+        self.assertEqual((m["sa"], m["sb"]), (2, 1))
+        self.assertIsNone(m["sets"])
+
+    def test_full_tournament_with_set_points(self):
+        rng = random.Random(11)
+        for n in (5, 9, 16):
+            with self.subTest(players=n):
+                s = new_tournament(n, setsToWin=2)
+                steps = 0
+                while s["phase"] != "done":
+                    steps += 1
+                    assert steps < 1000
+                    ph = s["phase"]
+                    ms = ([(m, "ko") for r in s["ko"]["rounds"] for m in r] + ([(s["ko"]["third"], "third")] if s["ko"]["third"] else [])) if ph == "ko" else [(m, ph) for m in s[ph]]
+                    m, st = [(m, st) for m, st in ms if m["a"] and m["b"] and m["sa"] is None][0]
+                    sets = [[11, rng.randint(0, 9)] if rng.random() < .5 else [rng.randint(0, 9), 11] for _ in range(2)]
+                    if sets[0][0] > sets[0][1] and sets[1][0] < sets[1][1] or sets[0][0] < sets[0][1] and sets[1][0] > sets[1][1]:
+                        sets.append([11, 6] if rng.random() < .5 else [6, 11])
+                    S.set_score(s, st, m["id"], None, None, True, None, None, sets)
+                self.assertEqual(s["phase"], "done")
+
+    def test_score_mode_setting(self):
+        s = new_tournament(4)
+        self.assertEqual(s["scoreMode"], "points")
+        S.admin_action(s, {"action": "settings", "scoreMode": "sets"})
+        self.assertEqual(s["scoreMode"], "sets")
+        with self.assertRaises(S.Err):
+            S.admin_action(s, {"action": "settings", "scoreMode": "nonsense"})
+
+
 if __name__ == "__main__":
     unittest.main()
