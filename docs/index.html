@@ -167,11 +167,11 @@ tr.me td{font-weight:800}
   @keyframes rise{from{transform:translateY(16px);opacity:.2}to{transform:none;opacity:1}}
 }
 
-details.stats .stats{margin-bottom:16px}
+details.statsbox .stats{margin-bottom:16px}
 .match .ticking{color:var(--coral-deep);font-weight:700}
 .timing{margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:.92rem}
-.adminbar{position:sticky;top:0;z-index:30;display:flex;justify-content:flex-end;padding:10px 0 0;pointer-events:none;height:0;overflow:visible}
-.adminbar .btn{pointer-events:auto;box-shadow:0 6px 20px rgba(0,0,0,.2);transform:translateY(6px)}
+.admfab{position:fixed;top:14px;right:14px;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.28)}
+.admfab[hidden]{display:none}
 dialog#adm{width:min(760px,calc(100% - 24px));max-height:calc(100dvh - 24px);overflow:auto}
 #adm .admhead{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 16px 0}
 #adm .admhead h2{font-size:1.2rem}
@@ -236,6 +236,7 @@ footer a{color:inherit}
 <main class="wrap" id="app"><p class="notice">Ładowanie turnieju…</p></main>
 <footer class="wrap"><span class="live" id="live">Wyniki odświeżają się same</span> · <a href="https://github.com/mr-powerbi/table-tennis-tournament" rel="noopener">Kod na GitHubie</a></footer>
 
+<button type="button" class="btn small admfab" id="admopen" hidden>⚙ Panel organizatora</button>
 <dialog id="dlg"><form method="dialog" class="dlg" id="dlgform"></form></dialog>
 <dialog id="adm" aria-label="Panel organizatora"><div class="admhead"><h2>Panel organizatora</h2><button type="button" class="ghost small" id="admclose">Zamknij ✕</button></div><div id="admbody"></div></dialog>
 <div class="toast" id="toast" hidden></div>
@@ -312,7 +313,6 @@ function fmtDate(iso){try{return new Date(iso).toLocaleString('pl-PL',{weekday:'
 function render(){
   header(); steps();
   const out=[];
-  if(S.admin) out.push(adminBar());
   if(S.demo) out.push(demoBar());
   if(S.phase==='done') out.push(podium());
   if(S.phase==='signup') out.push(signup());
@@ -329,14 +329,13 @@ function render(){
   out.push(allResults());
   if(!['ko','done'].includes(S.phase)) out.push(statsSec());
   out.push(howto());
+  $('#admopen').hidden=!S.admin;
   const ad=$('#adm');
   if(!S.admin){ if(ad.open) ad.close(); $('#admbody').innerHTML=''; }
   else if(!(ad.open&&ad.contains(document.activeElement))) $('#admbody').innerHTML=adminPanel();
   $('#app').innerHTML=out.join('');
   bind();
 }
-
-function adminBar(){ return `<div class="adminbar"><button type="button" class="btn small" data-adminopen>⚙ Panel organizatora</button></div>`; }
 
 function demoBar(){
   const canSim=['r1','r2','ll','ko'].includes(S.phase);
@@ -473,7 +472,7 @@ function statsSec(){
     cards.push(card('Łącznie przy stole',fmtDur(tot),'','suma czasu zmierzonych meczów'));
   }
   if(!cards.length) return '';
-  return `<details class="how stats" data-stats ${statsOpen?'open':''}><summary>Statystyki turnieju</summary><p class="sub" style="margin:0 0 12px">Liczone ze wszystkich rozegranych meczów, łącznie z Lucky Losers i drabinką.${timed.length?' Czas meczu mierzymy od kliknięcia „Start meczu” do wpisania wyniku.':''}</p><div class="stats">${cards.join('')}</div></details>`;
+  return `<details class="how statsbox" data-stats ${statsOpen?'open':''}><summary>Statystyki turnieju</summary><p class="sub" style="margin:0 0 12px">Liczone ze wszystkich rozegranych meczów, łącznie z Lucky Losers i drabinką.${timed.length?' Czas meczu mierzymy od kliknięcia „Start meczu” do wpisania wyniku.':''}</p><div class="stats">${cards.join('')}</div></details>`;
 }
 
 function allResults(){
@@ -613,8 +612,7 @@ function toLocalInput(iso){const d=new Date(iso);const z=n=>String(n).padStart(2
 async function run(fn,okMsg){ if(busy) return; busy=true; try{const s=await fn(); if(s&&s.rev!==undefined){S=s;lastRev=s.rev;render();} if(okMsg){ const a=$('#adm'); if(a&&a.open) a.close(); toast(okMsg); }}catch(e){toast(e.message)} finally{busy=false} }
 
 function bind(){
-  document.querySelectorAll('[data-adminopen]').forEach(b=>b.onclick=()=>$('#adm').showModal());
-  if(!bind.adm){ bind.adm=true; $('#admclose').onclick=()=>$('#adm').close(); $('#adm').addEventListener('click',e=>{ if(e.target===e.currentTarget) e.currentTarget.close(); }); }
+  if(!bind.adm){ bind.adm=true; $('#admopen').onclick=()=>$('#adm').showModal(); $('#admclose').onclick=()=>$('#adm').close(); $('#adm').addEventListener('click',e=>{ if(e.target===e.currentTarget) e.currentTarget.close(); }); }
   document.querySelectorAll('details[data-stats]').forEach(d=>d.addEventListener('toggle',()=>{ statsOpen=d.open; }));
   document.querySelectorAll('[data-demo]').forEach(b=>b.onclick=()=>run(async()=>{
     const a=b.dataset.demo;
