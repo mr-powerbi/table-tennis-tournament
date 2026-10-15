@@ -19,6 +19,7 @@ The app's interface is in Polish, because that's who it was built for. The docum
 - Live view: the page refreshes itself every few seconds.
 - Current stage, one combined standings table, bracket, podium, all results and a collapsible stats panel (right under the bracket).
 - Organizer panel opens as a pop-up from a button at the top, so there is no scrolling to the bottom.
+- Polish and English UI: PL/EN switch in the top-right corner (defaults to the browser language, remembered per device, `?lang=en` forces a language). Server and engine messages are translated in the browser.
 - Match timer: the organizer taps *Start* on a match, entering the result ends it. Stats then show average, longest and shortest match time and how deuce games affect length.
 - Matches of the people signed up from your phone are highlighted.
 
