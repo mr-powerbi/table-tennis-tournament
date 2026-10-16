@@ -401,6 +401,11 @@ const EXTRA_NAMES=['Michał S.','Natalia B.','Oskar D.','Weronika K.','Adrian L.
 const ADV_PCTS=[70,65,60,55,50,45,40,35,30,25,20,15,10];
 const ceilEven=x=>{ const c=Math.ceil(x-1e-9); return c%2?c+1:c; };
 const directFor=(N,pct)=>Math.max(2,Math.min(ceilEven(N*pct/100),N-(N%2)));
+const directOptions=(N,pct0,rec)=>{ // every even count from N down to the 10% floor, with a percentage that yields it
+  const maxD=N%2?N-1:N-2, minD=Math.max(2,ceilEven(N*0.1)), cur=directFor(N,pct0), recD=directFor(N,rec), out=[];
+  for(let d=Math.max(maxD,2);d>=minD;d-=2){ let pc=null; for(let p=1;p<=100;p++) if(directFor(N,p)===d){pc=p;break;} if(pc==null) continue; out.push({d,pct:pc,share:Math.round(d*100/N),sel:d===cur,rec:d===recD}); }
+  if(!out.some(o=>o.sel)) out.push({d:cur,pct:pct0,share:Math.round(cur*100/N),sel:true,rec:cur===recD});
+  return out; };
 const recPctFor=N=>{ let best=50,bd=Infinity; for(const p of ADV_PCTS){ const d=Math.abs(directFor(N,p)-N/2); if(d<bd-1e-9){bd=d;best=p;} } return best; };
 const recLFor=(pool,mode)=>{ const cap=mode==='playoff'?Math.floor(pool/2):pool; const L=Math.round((pool*(mode==='playoff'?0.25:0.5))/2)*2; return Math.max(0,Math.min(Math.max(L,2),cap)); };
 const groupSizesFor=(N,size)=>{ const G=Math.max(1,Math.floor(N/size+0.5)), base=Math.floor(N/G), extra=N%G; return Array.from({length:G},(_,g)=>base+(g<extra?1:0)); };
@@ -425,7 +430,7 @@ const isPow2=x=>x>=2&&(x&(x-1))===0;
 function bracketShape(M){
   let P=1; while(P*2<=M) P*=2; const R=M-P;
   return R===0?tr('pełna drabinka','a full bracket')
-    :tr(`runda wstępna: ${2*R} najsłabszych gra ${R} ${plural(R,'mecz','mecze','meczów')}, ${P-R} najlepszych ma wolny los`,`play-in round: the ${2*R} lowest seeds play ${R} ${R===1?'match':'matches'}, the best ${P-R} have a bye`);
+    :tr(`mecz wstępny: ${2*R} najniżej rozstawionych gra ze sobą ${R} ${plural(R,'mecz','mecze','meczów')} (${R===1?'zwycięzca idzie dalej':'zwycięzcy idą dalej'}), a ${P-R} najlepszych z tabeli czeka i wchodzi od razu do głównej drabinki na ${P}`,`play-in: the ${2*R} lowest seeds play each other in ${R} ${R===1?'match':'matches'} (${R} ${R===1?'winner goes':'winners go'} on), while the best ${P-R} from the table wait and enter the main ${P}-player bracket directly`);
 }
 function koSummary(N,plan){
   return tr(`Do fazy pucharowej: ${plan.D} bezpośrednio${plan.L?` + ${plan.L} Lucky Losers`:''} = ${plan.M} ${plural(plan.M,'gracz','graczy','graczy')} (${Math.round(100*plan.M/N)}% pola). ${bracketShape(plan.M).replace(/^./,c=>c.toUpperCase())}.`,
@@ -872,8 +877,7 @@ function adminPanel(){
   const N=S.players.length, locked=p!=='signup', fmt=S.format||'rounds', R=roundN(), gsz=S.groupSize||4, gadv=S.groupAdvance||2;
   const koLocked=['ko','done'].includes(p);
   const rec=S.recPct||recPctFor(N), pct0=S.advancePct==null?rec:S.advancePct;
-  const pctList=ADV_PCTS.includes(pct0)?ADV_PCTS:[...ADV_PCTS,pct0].sort((a,b)=>b-a);
-  const pctOpts=pctList.map(pc=>{ const d=directFor(N,pc); return `<option value="${pc}" ${pc===pct0?'selected':''}>${pc}% → ${d} ${tr(plural(d,'osoba','osoby','osób'),d===1?'player':'players')}${isPow2(d)?' · '+tr('pełna drabinka','full bracket'):''}${pc===rec?' · '+tr('zalecane','recommended'):''}</option>`; }).join('');
+  const pctOpts=directOptions(N,pct0,rec).map(o=>`<option value="${o.pct}" ${o.sel?'selected':''}>${o.d} ${tr(plural(o.d,'osoba','osoby','osób'),o.d===1?'player':'players')} (${o.share}%)${isPow2(o.d)?' · '+tr('pełna drabinka','full bracket'):''}${o.rec?' · '+tr('zalecane','recommended'):''}</option>`).join('');
   const llOn=S.luckyLosers===true, llMode=S.llMode==='table'?'table':'playoff';
   const base=koPlanFor({N,groups:fmt==='groups',size:gsz,adv:gadv,pct:pct0,ll:false});
   const plan=koPlanFor({N,groups:fmt==='groups',size:gsz,adv:gadv,pct:pct0,ll:llOn,mode:llMode,spots:S.llSpots});

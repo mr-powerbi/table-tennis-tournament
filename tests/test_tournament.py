@@ -333,7 +333,7 @@ class TournamentTest(unittest.TestCase):
                     s2["luckyLosers"] = False
                     self.assertEqual(S.knockout_plan(s2)["L"], 0)
         s = new_tournament(10)
-        for bad in ({"advancePct": 3}, {"llMode": "nonsense"}, {"llSpots": 65}):
+        for bad in ({"advancePct": 0}, {"llMode": "nonsense"}, {"llSpots": 65}):
             with self.assertRaises(S.Err):
                 S.admin_action(s, dict(bad, action="settings"))
 

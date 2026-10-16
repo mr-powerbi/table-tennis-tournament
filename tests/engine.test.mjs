@@ -216,7 +216,7 @@ for (const n of [12, 20, 26, 33]) {
     assert.equal(E.request('api/state').L, 0);
   }
 }
-assert.throws(() => E.request('api/admin', { action: 'settings', advancePct: 3 }));
+assert.throws(() => E.request('api/admin', { action: 'settings', advancePct: 0 }));
 assert.throws(() => E.request('api/admin', { action: 'settings', llMode: 'nonsense' }));
 
 // Groups: the Lucky Losers come from the players right behind the qualifiers (the third places).

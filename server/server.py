@@ -747,8 +747,8 @@ def admin_action(s, body):
         if "advancePct" in body:
             v = body["advancePct"]
             v = None if v in (None, "", "auto") else int(v)
-            if v is not None and not (5 <= v <= 95):
-                raise Err("Odsetek awansujących musi mieścić się między 5% a 95%.")
+            if v is not None and not (1 <= v <= 100):
+                raise Err("Odsetek awansujących musi mieścić się między 1% a 100%.")
             ko_key("advancePct", v)
         if "luckyLosers" in body:
             ko_key("luckyLosers", body["luckyLosers"] is True or body["luckyLosers"] == "true")

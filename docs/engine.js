@@ -541,7 +541,7 @@
       }
       if ('advancePct' in body) {
         const v = [null, undefined, '', 'auto'].includes(body.advancePct) ? null : parseInt(body.advancePct, 10);
-        if (v !== null && !(v >= 5 && v <= 95)) throw new Err('Odsetek awansujących musi mieścić się między 5% a 95%.');
+        if (v !== null && !(v >= 1 && v <= 100)) throw new Err('Odsetek awansujących musi mieścić się między 1% a 100%.');
         koKey('advancePct', v);
       }
       if ('luckyLosers' in body) koKey('luckyLosers', body.luckyLosers === true || body.luckyLosers === 'true');
