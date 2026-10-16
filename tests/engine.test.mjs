@@ -1,5 +1,5 @@
-// Symulacje pełnych turniejów na silniku przeglądarkowym (docs/engine.js).
-// Uruchom: node tests/engine.test.mjs
+// Full-tournament simulations on the in-browser engine (docs/engine.js).
+// Run: node tests/engine.test.mjs
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
@@ -17,7 +17,7 @@ const E = ctx.TTEngine;
 function playOut(s) {
   let guard = 0;
   while (s.phase !== 'done') {
-    assert.ok(guard++ < 200, 'turniej się zapętlił');
+    assert.ok(guard++ < 200, 'the tournament got stuck in a loop');
     s = E.simulateStage();
   }
   return s;
@@ -30,13 +30,13 @@ for (let n = 3; n <= 40; n++) {
   let s = E.request('api/admin', { action: 'draw' });
   s = playOut(s);
   const played = s.ranking.map((r) => r.played);
-  assert.ok(Math.min(...played) >= 2, `n=${n}: każdy gra co najmniej dwa mecze`);
+  assert.ok(Math.min(...played) >= 2, `n=${n}: everyone plays at least two matches`);
   const first = new Set(s.ko.rounds[0].flatMap((m) => [m.a, m.b]));
-  assert.equal(first.size, s.K, `n=${n}: pełna drabinka`);
+  assert.equal(first.size, s.K, `n=${n}: full bracket`);
   checked++;
 }
 
-// Wynik punktowy jest walidowany tak jak na serwerze.
+// A points result is validated the same way as on the server.
 store.clear();
 E.freshWithPlayers(['A1', 'B2', 'C3', 'D4']);
 let s = E.request('api/admin', { action: 'draw' });
@@ -44,7 +44,7 @@ assert.throws(() => E.request('api/score', { stage: 'r1', id: s.r1[0].id, pa: 11
 s = E.request('api/score', { stage: 'r1', id: s.r1[0].id, pa: 12, pb: 10 });
 assert.deepEqual([s.r1[0].sa, s.r1[0].sb], [1, 0]);
 
-// Mecz do dwóch setów: wynik meczu liczy się z punktów każdego seta.
+// Match to two sets: the match score is derived from the points of every set.
 store.clear();
 E.freshWithPlayers(['A1', 'B2', 'C3', 'D4']);
 E.request('api/admin', { action: 'settings', setsToWin: 2 });
@@ -56,10 +56,10 @@ assert.equal(JSON.stringify(s.r1[0].sets), JSON.stringify([[11, 9], [5, 11], [11
 for (const bad of [[[11, 9]], [[11, 9], [11, 3], [11, 5]], [[11, 10], [11, 3]]])
   assert.throws(() => E.request('api/score', { stage: 'r1', id: mid, sets: bad }));
 assert.throws(() => E.request('api/score', { stage: 'r1', id: mid, pa: 11, pb: 3 }));
-s = E.request('api/score', { stage: 'r1', id: mid, sa: 2, sb: 0 }); // sam wynik w setach nadal działa
+s = E.request('api/score', { stage: 'r1', id: mid, sa: 2, sb: 0 }); // a sets-only result still works
 assert.equal(s.r1[0].sets, null);
 assert.throws(() => E.request('api/admin', { action: 'settings', scoreMode: 'nonsense' }));
-// Losowe turnieje do 2 i 3 setów (w obu trybach wpisywania) dochodzą do podium.
+// Tournaments to 2 and 3 sets (in both entry modes) reach the podium.
 for (const [sets, mode] of [[2, 'points'], [3, 'points'], [2, 'sets'], [1, 'sets']]) {
   store.clear();
   E.freshWithPlayers(Array.from({ length: 13 }, (_, i) => `Gracz ${i}`));
@@ -70,10 +70,28 @@ for (const [sets, mode] of [[2, 'points'], [3, 'points'], [2, 'sets'], [1, 'sets
   assert.equal(withSets > 0, sets > 1 && mode === 'points', `sets=${sets} mode=${mode}`);
 }
 
-// Przykładowe dane z demo dają się wczytać i są zakończonym turniejem.
+// Bracket without Lucky Losers (llSpots 0) and explicit bracket sizes.
+store.clear();
+E.freshWithPlayers(Array.from({ length: 20 }, (_, i) => `Gracz ${i}`));
+E.request('api/admin', { action: 'settings', koSize: 8, llSpots: 0 });
+s = E.request('api/admin', { action: 'draw' });
+assert.equal(s.K, 8); assert.equal(s.D, 8); assert.equal(s.L, 0);
+s = playOut(s);
+assert.equal(s.ll.length, 0);
+assert.equal(s.ko.rounds[0].length, 4);
+store.clear();
+E.freshWithPlayers(Array.from({ length: 40 }, (_, i) => `Gracz ${i}`));
+s = E.request('api/admin', { action: 'settings', koSize: 8, llSpots: 3 });
+assert.deepEqual([s.K, s.D, s.L], [8, 5, 3]);
+s = E.request('api/admin', { action: 'settings', llSpots: 'auto' });
+assert.deepEqual([s.K, s.D, s.L], [8, 6, 2]);
+assert.throws(() => E.request('api/admin', { action: 'settings', llSpots: 17 }));
+assert.throws(() => E.request('api/admin', { action: 'settings', koSize: 12 }));
+
+// The sample demo data loads and is a finished tournament.
 store.clear();
 s = E.loadState(JSON.parse(readFileSync(new URL('../docs/demo-data.json', import.meta.url), 'utf8')));
 assert.equal(s.phase, 'done');
 assert.equal(s.players.length, 26);
 
-console.log(`OK: ${checked} pełnych turniejów (3–40 graczy) i testy walidacji`);
+console.log(`OK: ${checked} full tournaments (3–40 players) and validation tests`);

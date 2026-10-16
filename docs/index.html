@@ -25,7 +25,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap">
 <style>
-/* Układ: jedna kolumna jak program meczowy; koralowy akcent, brzoskwiniowa mgiełka w nagłówku. */
+/* Layout: one column like a match programme; coral accent, peach haze in the header. */
 :root{
   --bg:#FFFFFF; --surface:#FAF6F3; --card:#FFFFFF; --ink:#232120; --muted:#6E6662; --line:#EDE4DE;
   --coral:#EC6A55; --coral-deep:#D9533E; --on-coral:#FFFFFF; --peach:#F6B28A; --peach-soft:#FDEEE5;
@@ -170,6 +170,13 @@ tr.me td{font-weight:800}
 details.statsbox .stats{margin-bottom:16px}
 .match .ticking{color:var(--coral-deep);font-weight:700}
 .timing{margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:.92rem}
+.plans{display:grid;gap:8px}
+.planlist{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))}
+.plan{appearance:none;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;border-radius:12px;padding:10px 12px;cursor:pointer;display:grid;gap:3px;text-align:left}
+.plan:hover{border-color:color-mix(in srgb,var(--coral) 50%, var(--line))}
+.plan.on{border-color:var(--coral);background:var(--peach-soft)}
+.plan b{font-size:.95rem}
+.plan span{font-size:.8rem;color:var(--muted)}
 .setgrid{display:grid;gap:8px;margin:12px 0 4px}
 .setrow{display:grid;grid-template-columns:3.4em 1fr auto 1fr;gap:8px;align-items:center}
 .setrow[hidden]{display:none}
@@ -299,9 +306,9 @@ const ERR_EN={
 'Ktoś już jest zapisany pod tym imieniem. Dodaj nazwisko lub inicjał.':'Someone is already signed up under that name. Add a surname or an initial.',
 'Mecz może być do 1, 2 albo 3 wygranych setów.':'A match can be first to 1, 2 or 3 sets.',
 'Format meczu można zmienić tylko przed losowaniem.':'The match format can only be changed before the draw.',
-'Drabinka może mieć 2, 4, 8, 16 lub 32 miejsca.':'The bracket can have 2, 4, 8, 16 or 32 places.',
+'Drabinka może mieć 2, 4, 8, 16, 32 lub 64 miejsca.':'The bracket can have 2, 4, 8, 16, 32 or 64 places.',
 'Drabinka już ruszyła. Cofnij turniej, aby zmienić jej rozmiar.':'The bracket has already started. Roll the tournament back to change its size.',
-'Miejsc dla Lucky Losers może być od 1 do 16.':'Lucky Losers places can be from 1 to 16.',
+'Miejsc dla Lucky Losers może być od 0 do 16.':'Lucky Losers places can be from 0 to 16.',
 'Drabinka już ruszyła. Cofnij do Lucky Losers lub rundy 2, aby to zmienić.':'The bracket has already started. Roll back to Lucky Losers or round 2 to change this.',
 'W Lucky Losers są już wyniki. Cofnij do rundy 2, aby zmienić liczbę miejsc.':'Lucky Losers already has results. Roll back to round 2 to change the number of places.',
 'Błędna data.':'Invalid date.',
@@ -358,7 +365,7 @@ let S=null, lastRev=-1, busy=false, dlgOpen=false, statsOpen=false, tblView=null
 
 function toast(msg){const t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,3200);}
 
-// Tryb demo: na GitHub Pages, z pliku albo z ?demo działa silnik w przeglądarce (engine.js) zamiast serwera.
+// Demo mode: on GitHub Pages, from a local file or with ?demo the in-browser engine (engine.js) runs instead of the server.
 let DEMO=/\.github\.io$/.test(location.hostname)||location.protocol==='file:'||new URLSearchParams(location.search).has('demo');
 async function demoBoot(){
   if(TTEngine.hasState()) return;
@@ -366,17 +373,44 @@ async function demoBoot(){
   catch(e){ TTEngine.freshWithPlayers(DEMO_NAMES); }
 }
 const EXTRA_NAMES=['Michał S.','Natalia B.','Oskar D.','Weronika K.','Adrian L.','Julia P.','Dominik R.','Alicja M.','Sebastian T.','Magda Z.','Karol W.','Iza H.'];
+// ---------- bracket / Lucky Losers sizing, derived from the number of players ----------
+const pow2Floor=n=>{ let k=1; while(k*2<=n) k*=2; return Math.max(k,2); };
+const defaultK=n=>{ let k=2; while(k*2<=Math.max(2,Math.floor(n*0.75))) k*=2; return Math.min(k,pow2Floor(n)); };
+const autoL=(K,N)=>Math.max(0,Math.min(Math.max(1,Math.floor(K/4)),K,N-K));
+const maxL=(K,N)=>Math.max(0,Math.min(K,N-K,16));
+function bracketPlans(N){
+  if(N<3) return [];
+  let ks=[]; for(let k=2;k<=Math.min(64,pow2Floor(N));k*=2){ if(k>N||(k===N&&N>4)||k/N<0.15) continue; ks.push(k); }
+  if(!ks.length) ks=[2];
+  const rk=defaultK(N), rec={K:rk,L:autoL(rk,N)};
+  ks.sort((a,b)=>(b===rk)-(a===rk)||Math.abs(a/N-.5)-Math.abs(b/N-.5)||b-a);
+  const plans=[];
+  ks.slice(0,3).forEach(K=>{
+    const a=autoL(K,N), m=maxL(K,N), more=Math.min(m,Math.floor(K/2));
+    // automatic, no Lucky Losers, and (for the recommended size) a variant with more Lucky Losers spots
+    const Ls=[a,0].concat(K===rk?[more]:[]);
+    [...new Set(Ls)].filter(L=>L>=0&&L<=m&&K-L>=Math.ceil(K/2)).forEach(L=>plans.push({K,L,D:K-L,out:N-K,pct:Math.round(100*K/N),rec:K===rec.K&&L===rec.L,auto:L===a}));
+  });
+  return plans.slice(0,8);
+}
+function llOptionsFor(K,N){
+  const auto=autoL(K,N);
+  return [['',tr('Automatycznie','Automatic')+' ('+auto+')'],...Array.from({length:maxL(K,N)+1},(_,v)=>[String(v),v===0?tr('0 (bez Lucky Losers)','0 (no Lucky Losers)'):v+' '+tr('(gra '+(2*v)+' najlepszych spoza awansu)','(the best '+(2*v)+' outside direct qualification play)')])];
+}
+function planText(pl,N){
+  const places=n=>n===1?'place':'places';
+  return tr(`${pl.D} bezpośrednio${pl.L?` + ${pl.L} z Lucky Losers (o ${pl.L} ${plural(pl.L,'miejsce','miejsca','miejsc')} gra ${2*pl.L} ${plural(2*pl.L,'gracz','graczy','graczy')})`:''} · awansuje ${pl.pct}% (${pl.K} z ${N}), odpada ${pl.out}`,
+    `${pl.D} straight in${pl.L?` + ${pl.L} via Lucky Losers (${2*pl.L} players play for ${pl.L} ${places(pl.L)})`:''} · ${pl.pct}% advance (${pl.K} of ${N}), ${pl.out} out`);
+}
 function randomTournament(){
   const rnd=(a,b)=>a+Math.floor(Math.random()*(b-a+1));
   const n=rnd(6,32), pool=[...DEMO_NAMES,...EXTRA_NAMES];
   for(let i=pool.length-1;i>0;i--){ const j=rnd(0,i); [pool[i],pool[j]]=[pool[j],pool[i]]; }
   TTEngine.freshWithPlayers(pool.slice(0,n));
   const sets=[1,1,1,2,3][rnd(0,4)];
-  const ks=[2,4,8,16,32].filter(k=>k<=Math.max(2,n)&&k<n);
-  const settings={action:'settings',setsToWin:sets,scoreMode:Math.random()<.65?'points':'sets',koSize:Math.random()<.5||!ks.length?null:ks[rnd(0,ks.length-1)]};
+  const plans=bracketPlans(n), pl=plans.length?plans[rnd(0,plans.length-1)]:null;
+  const settings={action:'settings',setsToWin:sets,scoreMode:Math.random()<.65?'points':'sets',...(pl?{koSize:pl.K,llSpots:pl.L}:{})};
   try{ TTEngine.request('api/admin',settings); }catch(e){ TTEngine.request('api/admin',{action:'settings',setsToWin:sets}); }
-  const K=TTEngine.request('api/state').K, lls=[1,2,3,4,5,6,7,8].filter(v=>v<=Math.min(K,Math.max(1,n-K)));
-  if(lls.length&&Math.random()<.5){ try{ TTEngine.request('api/admin',{action:'settings',llSpots:lls[rnd(0,lls.length-1)]}); }catch(e){} }
   const st=TTEngine.request('api/admin',{action:'draw'});
   randomTournament.info={n,sets:st.setsToWin,K:st.K,L:st.L};
   return st;
@@ -550,7 +584,7 @@ function statsSec(){
   add(S.r1,stg('r1')); add(S.r2,stg('r2')); add(S.ll,stg('ll'));
   if(S.ko){ S.ko.rounds.forEach(r=>add(r,roundName(r.length,true))); if(S.ko.third) add([S.ko.third],stg('third')); }
   const multi=T()>1;
-  // jednostki punktowe: cały mecz (do 1 seta) albo każdy set osobno (mecze do kilku setów)
+  // point units: the whole match (single set) or every set separately (multi-set matches)
   const seq=[];
   all.forEach(([l,m])=>{
     if(!multi){ if(m.pa!=null) seq.push([l,m]); }
@@ -562,7 +596,7 @@ function statsSec(){
   const unitN=n=>multi?pn(n,['set','sety','setów'],['set','sets']):pn(n,['mecz','mecze','meczów'],['match','matches']);
   const scoreStr=m=>Array.isArray(m.sets)?m.sets.map(x=>x[0]+':'+x[1]).join(', '):(!multi&&m.pa!=null?Math.max(m.pa,m.pb)+':'+Math.min(m.pa,m.pb):`${Math.max(m.sa,m.sb)}:${Math.min(m.sa,m.sb)}`);
   const cards=[];
-  // ----- poziom meczu (działa zawsze, także gdy wpisywano tylko wyniki w setach) -----
+  // ----- match level (always available, also when only set results were entered) -----
   const M={}; const mp=id=>M[id]||(M[id]={id,w:0,n:0,run:0,best:0,sw:0,sl:0,cb:0});
   let full=0, comebacks=0;
   all.forEach(([,m])=>{
@@ -589,7 +623,7 @@ function statsSec(){
     }
     if(up&&up.gap>=3) cards.push(card(tr('Największa niespodzianka','Biggest upset'),tr(`${up.gap} ${plural(up.gap,'miejsce','miejsca','miejsc')}`,`${up.gap} ${up.gap===1?'place':'places'}`),tr(`${esc(name(up.w))} pokonuje ${esc(name(up.lo))}`,`${esc(name(up.w))} beats ${esc(name(up.lo))}`),tr(`#${idx[up.w]+1} wygrywa z #${idx[up.lo]+1} · ${scoreStr(up.m)} · ${up.l}`,`#${idx[up.w]+1} beats #${idx[up.lo]+1} · ${scoreStr(up.m)} · ${up.l}`),true));
   }
-  // ----- poziom punktów (gdy wpisywano punkty) -----
+  // ----- point level (when points were entered) -----
   if(seq.length>=3){
     const diff=m=>Math.abs(m.pa-m.pb), sum=m=>m.pa+m.pb, wp=m=>m.pa>m.pb?m.a:m.b;
     const txt=([l,m])=>{const w=wp(m),lo=w===m.a?m.b:m.a,hi=Math.max(m.pa,m.pb),lw=Math.min(m.pa,m.pb);return {w:`${esc(name(w))} – ${esc(name(lo))}`,d:`${hi}:${lw} · ${l}`};};
@@ -757,11 +791,15 @@ function podium(){
 function adminPanel(){
   const p=S.phase; const dl=S.deadline?toLocalInput(S.deadline):'';
   const mode=S.scoreMode||'points';
-  const auto=n=>tr('Automatycznie','Automatic')+' ('+n+')';
-  const kOpts=[['',auto(S.K)],...[2,4,8,16,32].filter(k=>k<=Math.max(2,S.players.length)).map(k=>[k,k+' '+tr('miejsc','places')])];
-  const llOpts=[['',auto(Math.max(1,Math.floor(S.K/4)))],...[1,2,3,4,5,6,7,8].filter(v=>v<=Math.min(S.K,Math.max(1,S.players.length-S.K))).map(v=>[v,v+' '+tr('(gra '+(2*v)+' najlepszych spoza awansu)','(the best '+(2*v)+' outside direct qualification play)')])];
+  const N=S.players.length, auto=n=>tr('Automatycznie','Automatic')+' ('+n+')';
+  const kOpts=[['',auto(defaultK(N))]];
+  for(let k=2;k<=Math.min(64,pow2Floor(N));k*=2) if(k<=Math.max(2,N)) kOpts.push([k,`${k} ${tr(plural(k,'miejsce','miejsca','miejsc'),'places')} (${Math.round(100*k/Math.max(N,1))}%)`]);
+  const plans=['ko','done'].includes(p)?[]:bracketPlans(N);
+  const plansHtml=plans.length?`<div class="plans"><div class="qlbl">${tr(`Propozycje dla ${N} ${plural(N,'gracza','graczy','graczy')}`,`Suggestions for ${N} ${N===1?'player':'players'}`)}</div><div class="planlist">${plans.map(pl=>`<button type="button" class="plan ${pl.K===S.K&&pl.L===S.L?'on':''}" data-plan="${pl.K}:${pl.L}"><b>${pl.rec?'★ ':''}${pl.K} ${tr(plural(pl.K,'miejsce w drabince','miejsca w drabince','miejsc w drabince'),'bracket places')}${pl.rec?' · '+tr('zalecane','recommended'):''}</b><span>${planText(pl,N)}</span></button>`).join('')}</div></div>`:'';
+  const llOpts=llOptionsFor(S.K,N);
   return `<section class="admin">
   <p class="sub" style="margin:0">${S.demo?tr('W wersji demo jesteś organizatorem. Wszystko dzieje się w Twojej przeglądarce.','In the demo you are the organizer. Everything happens in your browser.'):tr('Widzisz go tylko na urządzeniu, na którym otwarto link organizatora. Nie udostępniaj go dalej.','You only see this on the device where the organizer link was opened. Do not share it.')}</p>
+  ${plansHtml}
   <form id="setf" class="grid2">
     <label class="f">${tr('Nazwa turnieju','Tournament name')}<input id="s_title" value="${esc(S.title)}" maxlength="120"></label>
     <label class="f">${tr('Edycja','Edition')}<input id="s_ed" value="${esc(S.edition)}" maxlength="60"></label>
@@ -769,7 +807,7 @@ function adminPanel(){
     <label class="f">${tr('Mecz do wygranych setów','Sets to win a match')}<select id="s_sets" ${p!=='signup'?'disabled':''}>${[1,2,3].map(v=>`<option value="${v}" ${v===T()?'selected':''}>${v}</option>`).join('')}</select></label>
     <label class="f">${tr('Wpisywanie wyników','Score entry')}<select id="s_mode"><option value="points" ${mode==='points'?'selected':''}>${T()===1?tr('Punkty seta','Set points'):tr('Punkty każdego seta','Points of every set')}</option><option value="sets" ${mode==='sets'?'selected':''}>${T()===1?tr('Tylko zwycięzca (szybciej)','Winner only (faster)'):tr('Tylko wynik w setach (szybciej)','Sets only (faster)')}</option></select></label>
     <label class="f">${tr('Miejsca w drabince','Bracket places')}<select id="s_k" ${['ko','done'].includes(p)?'disabled':''}>${kOpts.map(([v,l])=>`<option value="${v}" ${String(S.koSize||'')===String(v)?'selected':''}>${l}</option>`).join('')}</select></label>
-    <label class="f">${tr('Miejsca dla Lucky Losers','Lucky Losers places')}<select id="s_ll" ${['ko','done'].includes(p)?'disabled':''}>${llOpts.map(([v,l])=>`<option value="${v}" ${String(S.llSpots||'')===String(v)?'selected':''}>${l}</option>`).join('')}</select></label>
+    <label class="f">${tr('Miejsca dla Lucky Losers','Lucky Losers places')}<select id="s_ll" ${['ko','done'].includes(p)?'disabled':''}>${llOpts.map(([v,l])=>`<option value="${v}" ${String(S.llSpots??'')===String(v)?'selected':''}>${l}</option>`).join('')}</select></label>
     <label class="f">${tr('Automatyczne losowanie o','Automatic draw at')}<input id="s_dl" type="datetime-local" value="${dl}" ${p!=='signup'?'disabled':''}></label>
     <div style="display:flex;align-items:end"><button class="btn" type="submit">${tr('Zapisz ustawienia','Save settings')}</button></div>
   </form>
@@ -814,10 +852,13 @@ function bind(){
     run(()=>api('api/admin',{action:'select',sel:[...sel]}));});
   document.querySelectorAll('[data-confirm]').forEach(b=>b.onclick=()=>confirmBox(b.dataset.confirm));
   document.querySelectorAll('[data-rename]').forEach(b=>b.onclick=()=>renameBox(b.dataset.rename));
+  document.querySelectorAll('[data-plan]').forEach(b=>b.onclick=()=>{ const [K,L]=b.dataset.plan.split(':').map(Number); run(()=>api('api/admin',{action:'settings',koSize:K,llSpots:L}),tr(`Zastosowano: drabinka na ${K} miejsc, Lucky Losers: ${L}.`,`Applied: bracket of ${K}, Lucky Losers: ${L}.`)); });
+  const sk=$('#s_k'); if(sk) sk.addEventListener('change',()=>{ const N=S.players.length, K=sk.value?+sk.value:defaultK(N), sl=$('#s_ll'), prev=sl.value;
+    sl.innerHTML=llOptionsFor(K,N).map(([v,l])=>`<option value="${v}">${l}</option>`).join(''); if([...sl.options].some(o=>o.value===prev)) sl.value=prev; });
   const sf=$('#setf'); if(sf) sf.addEventListener('submit',e=>{e.preventDefault();
     const dlv=$('#s_dl').value; const body={action:'settings',title:$('#s_title').value,edition:$('#s_ed').value,prize:$('#s_prize').value,scoreMode:$('#s_mode').value};
     if(!$('#s_k').disabled) body.koSize=$('#s_k').value||null;
-    if(!$('#s_ll').disabled) body.llSpots=$('#s_ll').value||null;
+    if(!$('#s_ll').disabled) body.llSpots=$('#s_ll').value===''?null:+$('#s_ll').value;
     if(!$('#s_sets').disabled) body.setsToWin=+$('#s_sets').value;
     if(!$('#s_dl').disabled) body.deadline=dlv?new Date(dlv).toISOString():null;
     run(()=>api('api/admin',body),tr('Zapisano ustawienia.','Settings saved.'));});

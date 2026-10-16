@@ -1,6 +1,6 @@
-"""Symulacje pełnych turniejów na logice z server/server.py.
+"""Full-tournament simulations on the logic in server/server.py.
 
-Uruchom: python3 -m unittest discover tests
+Run: python3 -m unittest discover tests
 """
 import os
 import random
@@ -15,18 +15,18 @@ import server as S  # noqa: E402
 
 
 def play(s, rng, late_in=None):
-    """Wpisuje losowe wyniki, aż turniej dojdzie do podium.
+    """Enters random results until the tournament reaches the podium.
 
-    late_in: nazwa etapu (r1/r2), w którym dopisać spóźnionego gracza po pierwszym wyniku.
+    late_in: stage (r1/r2) in which a late player is added after the first result.
     """
     steps = 0
     late_done = False
     while s["phase"] != "done":
         steps += 1
-        assert steps < 1000, "turniej się zapętlił"
+        assert steps < 1000, "the tournament got stuck in a loop"
         ph = s["phase"]
         if late_in == ph and not late_done and any(m["sa"] is not None for m in s[ph]):
-            S.admin_action(s, {"action": "late", "name": "Spóźniony"})
+            S.admin_action(s, {"action": "late", "name": "Late Player"})
             late_done = True
         if ph == "ko":
             ms = [(m, "ko") for r in s["ko"]["rounds"] for m in r]
@@ -59,7 +59,7 @@ class TournamentTest(unittest.TestCase):
                 play(s, rng)
                 self.assertEqual(s["phase"], "done")
                 played = [x["played"] for x in S.stats(s).values()]
-                self.assertGreaterEqual(min(played), 2, "każdy gra co najmniej dwa mecze")
+                self.assertGreaterEqual(min(played), 2, "everyone plays at least two matches")
 
     def test_bracket_is_direct_qualifiers_plus_lucky_losers(self):
         s = new_tournament(26)
@@ -110,7 +110,7 @@ class TournamentTest(unittest.TestCase):
         self.assertIn("t0", m)
         self.assertNotIn("t1", m)
         S.set_score(s, "r1", m["id"], None, None, True, 11, 7)
-        self.assertIn("t1", m, "wpisanie wyniku kończy pomiar")
+        self.assertIn("t1", m, "entering the result stops the timer")
         with self.assertRaises(S.Err):
             S.start_match(s, "r1", m["id"], cancel=True)
         S.set_score(s, "r1", m["id"], None, None, True)
@@ -183,6 +183,28 @@ class TournamentTest(unittest.TestCase):
         self.assertEqual(s["scoreMode"], "sets")
         with self.assertRaises(S.Err):
             S.admin_action(s, {"action": "settings", "scoreMode": "nonsense"})
+
+
+    def test_bracket_without_lucky_losers(self):
+        rng = random.Random(5)
+        s = new_tournament(20, koSize=8, llSpots=0)
+        self.assertEqual(S.ll_plan(s), (8, 8, 0), "8 places, all direct, no Lucky Losers")
+        play(s, rng)
+        self.assertEqual(s["ll"], [])
+        self.assertEqual(len(s["ko"]["rounds"][0]), 4)
+
+    def test_lucky_losers_spots_and_bracket_size_settings(self):
+        s = new_tournament(40)
+        S.admin_action(s, {"action": "settings", "koSize": 32, "llSpots": 0})
+        self.assertEqual(S.ll_plan(s)[0], 32)
+        S.admin_action(s, {"action": "settings", "koSize": 8, "llSpots": 3})
+        self.assertEqual(S.ll_plan(s), (8, 5, 3))
+        S.admin_action(s, {"action": "settings", "llSpots": "auto"})
+        self.assertEqual(S.ll_plan(s), (8, 6, 2))
+        with self.assertRaises(S.Err):
+            S.admin_action(s, {"action": "settings", "llSpots": 17})
+        with self.assertRaises(S.Err):
+            S.admin_action(s, {"action": "settings", "koSize": 12})
 
 
 if __name__ == "__main__":

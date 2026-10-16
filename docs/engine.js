@@ -1,11 +1,13 @@
 /*
- * Silnik turnieju w przeglądarce (tryb demo na GitHub Pages).
+ * In-browser tournament engine (demo mode on GitHub Pages).
  *
- * To wierne przeniesienie logiki z server/server.py do JavaScriptu.
- * Frontend rozmawia z nim tak samo jak z serwerem: TTEngine.request(path, body)
- * przyjmuje te same ścieżki (api/state, api/join, api/leave, api/score, api/start, api/admin)
- * i zwraca ten sam publiczny stan. Stan trzymany jest w localStorage,
- * a odwiedzający jest zawsze organizatorem.
+ * A faithful port of the logic in server/server.py to JavaScript.
+ * The frontend talks to it the same way it talks to the server: TTEngine.request(path, body)
+ * takes the same paths (api/state, api/join, api/leave, api/score, api/start, api/admin)
+ * and returns the same public state. The state lives in localStorage and the visitor
+ * is always the organizer.
+ * Err(...) messages are user-facing text kept in Polish (the original interface language);
+ * the page translates them for the English UI (ERR_EN in index.html).
  */
 (function (global) {
   'use strict';
@@ -39,7 +41,7 @@
     };
   }
 
-  // ---------- logika turnieju (1:1 z server.py) ----------
+  // ---------- tournament logic (1:1 with server.py) ----------
 
   const valid = (sa, sb, T) => isInt(sa) && isInt(sb) && sa >= 0 && sb >= 0 && Math.max(sa, sb) === T && Math.min(sa, sb) < T;
 
@@ -163,7 +165,7 @@
 
   function llPlan(s) {
     const N = s.players.length, K = koSize(s);
-    let L = s.llSpots || Math.max(1, Math.floor(K / 4));
+    let L = s.llSpots == null ? Math.max(1, Math.floor(K / 4)) : s.llSpots; // 0 = no Lucky Losers
     L = Math.max(0, Math.min(L, K, N - K));
     return [K, K - L, L];
   }
@@ -225,7 +227,7 @@
   const STAGE_PHASE = { r1: ['r1'], r2: ['r2'], ll: ['ll'], ko: ['ko', 'done'], third: ['ko', 'done'] };
   const pointsOk = (pa, pb) => [pa, pb].every((v) => isInt(v) && v >= 0 && v <= 99) && Math.max(pa, pb) >= 11 && Math.abs(pa - pb) >= 2;
 
-  // Mecz do kilku setów: wpisuje się punkty każdego seta, wynik meczu (np. 2:1) liczy się z nich.
+  // Match to several sets: the points of every set are entered, the match score (e.g. 2:1) is derived from them.
   function scoreSets(sets, T) {
     const tooMany = () => new Err(`Za dużo setów: mecz kończy się, gdy ktoś wygra ${T} sety.`);
     if (sets.length > 2 * T - 1) throw tooMany();
@@ -270,7 +272,7 @@
       if (oldW !== newW) throw new Err('Ta zmiana zmienia zwycięzcę zamkniętej rundy. Najpierw cofnij turniej do tej rundy w panelu organizatora.');
     }
     Object.assign(m, clearing ? { sa: null, sb: null, pa: null, pb: null, sets: null } : { sa, sb, pa, pb, sets: setList });
-    // Czas meczu: start zapisuje organizator, wpisanie wyniku jest końcem.
+    // Match time: the organizer records the start, entering the result is the end.
     if (clearing) { delete m.t0; delete m.t1; } else if (m.t0 && !m.t1) m.t1 = now();
     if (stage === 'ko' || stage === 'third') propagate(s); else advance(s);
   }
@@ -317,14 +319,14 @@
       }
       if ('koSize' in body) {
         const v = emptyKey(body.koSize) ? null : parseInt(body.koSize, 10);
-        if (v !== null && ![2, 4, 8, 16, 32].includes(v)) throw new Err('Drabinka może mieć 2, 4, 8, 16 lub 32 miejsca.');
+        if (v !== null && ![2, 4, 8, 16, 32, 64].includes(v)) throw new Err('Drabinka może mieć 2, 4, 8, 16, 32 lub 64 miejsca.');
         if (['ko', 'done'].includes(s.phase) && v !== (s.koSize || null)) throw new Err('Drabinka już ruszyła. Cofnij turniej, aby zmienić jej rozmiar.');
         s.koSize = v;
       }
       if ('llSpots' in body) {
-        const v = emptyKey(body.llSpots) ? null : parseInt(body.llSpots, 10);
-        if (v !== null && !(v >= 1 && v <= 16)) throw new Err('Miejsc dla Lucky Losers może być od 1 do 16.');
-        if (v !== (s.llSpots || null)) {
+        const v = [null, undefined, '', 'auto'].includes(body.llSpots) ? null : parseInt(body.llSpots, 10);
+        if (v !== null && !(v >= 0 && v <= 16)) throw new Err('Miejsc dla Lucky Losers może być od 0 do 16.');
+        if (v !== (s.llSpots ?? null)) {
           if (['ko', 'done'].includes(s.phase)) throw new Err('Drabinka już ruszyła. Cofnij do Lucky Losers lub rundy 2, aby to zmienić.');
           if (s.phase === 'll' && (s.ll || []).some((m) => m.sa !== null)) throw new Err('W Lucky Losers są już wyniki. Cofnij do rundy 2, aby zmienić liczbę miejsc.');
           s.llSpots = v;
@@ -378,7 +380,7 @@
       else throw new Err('Nie można cofnąć do tego etapu.');
     } else if (act === 'reset') {
       const ns = newState();
-      for (const k of ['title', 'edition', 'prize', 'setsToWin', 'koSize', 'llSpots']) ns[k] = s[k] ?? ns[k];
+      for (const k of ['title', 'edition', 'prize', 'setsToWin', 'scoreMode', 'koSize', 'llSpots']) ns[k] = s[k] ?? ns[k];
       if (body.keepPlayers) ns.players = s.players;
       ns.rev = s.rev || 0;
       Object.keys(s).forEach((k) => delete s[k]);
@@ -405,7 +407,7 @@
     return out;
   }
 
-  // ---------- magazyn i "serwer" ----------
+  // ---------- storage and the "server" ----------
 
   let state = null;
   function load() {
@@ -417,7 +419,7 @@
     s.rev = (s.rev || 0) + 1;
     s.updated = now();
     state = s;
-    try { localStorage.setItem(STORE, JSON.stringify(s)); } catch (e) { /* tryb prywatny: stan zostaje w pamięci */ }
+    try { localStorage.setItem(STORE, JSON.stringify(s)); } catch (e) { /* private mode: the state stays in memory */ }
   }
 
   function request(path, body) {
@@ -451,12 +453,12 @@
       save(s);
       return Object.assign(publicState(s), extra);
     } catch (e) {
-      // Operacja pracuje na kopii, więc błąd w połowie nie zostawia popsutego stanu.
+      // The operation works on a copy, so an error halfway does not leave a broken state.
       throw e instanceof Err ? new Error(e.message) : e;
     }
   }
 
-  // ---------- funkcje tylko dla demo ----------
+  // ---------- demo-only helpers ----------
 
   function loadState(s) { const c = clone(s); c.rev = (state && state.rev) || 0; save(c); return publicState(c); }
 
@@ -468,7 +470,7 @@
     return publicState(s);
   }
 
-  // Rozgrywa losowo wszystkie gotowe mecze bieżącego etapu.
+  // Plays all ready matches of the current stage at random.
   function simulateStage() {
     if (!load()) return null;
     const s = clone(load());
@@ -479,13 +481,13 @@
     const pool = stage === 'ko' ? [...s.ko.rounds.flat().map((m) => ['ko', m]), ...(s.ko.third ? [['third', s.ko.third]] : [])] : s[stage].map((m) => [stage, m]);
     const todo = pool.filter(([, m]) => m.a && m.b && m.sa === null);
     if (!todo.length) throw new Error('Wszystkie gotowe mecze tego etapu mają już wyniki.');
-    // W drabince rozgrywamy jedną rundę naraz, żeby było widać, jak przechodzą zwycięzcy.
+    // In the bracket we play one round at a time so the winners can be seen advancing.
     const firstRound = stage === 'ko' ? s.ko.rounds.findIndex((r) => r.some((m) => m.a && m.b && m.sa === null)) : -1;
     for (const [st, m] of todo) {
       if (stage === 'ko' && st === 'ko' && !s.ko.rounds[firstRound].includes(m)) continue;
       if (T === 1) {
-        // ~15% meczów dochodzi do przewag (10:10); każda kolejna wymiana przedłuża grę z szansą ~45%,
-        // więc 12:10 jest częste, a 15:13 czy 18:16 zdarzają się rzadko, ale się zdarzają.
+        // ~15% of matches reach deuce (10:10); every further exchange extends the game with ~45% chance,
+        // so 12:10 is common while 15:13 or 18:16 are rare but do happen.
         let lose;
         if (Math.random() < 0.15) { lose = 10; while (lose < 40 && Math.random() < 0.45) lose++; } else lose = Math.floor(Math.random() * 10);
         const [pa, pb] = Math.random() < 0.5 ? [lose >= 10 ? lose + 2 : 11, lose] : [lose, lose >= 10 ? lose + 2 : 11];
@@ -495,7 +497,7 @@
       } else {
         const l = Math.floor(Math.random() * T);
         const aWins = Math.random() < 0.5;
-        // kolejność setów: zwycięzca meczu wygrywa ostatni, przegrany ma l setów wcześniej
+        // set order: the match winner takes the last set, the loser has l sets before it
         const order = Array(T - 1).fill(true).concat(Array(l).fill(false));
         for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
         order.push(true);

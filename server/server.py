@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Turniej tenisa stołowego: mały serwer HTTP (tylko biblioteka standardowa), stan w jednym pliku JSON.
+"""Table tennis tournament: a small HTTP server (standard library only), state kept in one JSON file.
 
-Uruchomienie:  python3 server/server.py
-Zmienne środowiskowe: TT_DATA (katalog danych), TT_STATIC (katalog z frontendem, domyślnie ../docs),
-TT_BIND (adres, domyślnie 127.0.0.1), TT_PORT (port, domyślnie 8187).
-Przy starcie serwer wypisuje link organizatora z tokenem w części #admin-…
+Run:  python3 server/server.py
+Environment variables: TT_DATA (data directory), TT_STATIC (frontend directory, default ../docs),
+TT_BIND (address, default 127.0.0.1), TT_PORT (port, default 8187).
+On start the server prints the organizer link with the token in the #admin-... part.
+
+Error messages raised with Err(...) are user-facing text kept in Polish, the original language of the
+interface. The browser translates them for the English UI (see ERR_EN in docs/index.html).
 """
 import hashlib, hmac, json, os, random, secrets, threading, datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -64,7 +67,7 @@ class Err(Exception):
     pass
 
 
-# ---------- logika turnieju ----------
+# ---------- tournament logic ----------
 
 def valid(sa, sb, T):
     if not isinstance(sa, int) or not isinstance(sb, int) or isinstance(sa, bool) or isinstance(sb, bool):
@@ -251,7 +254,9 @@ def advance(s):
 def ll_plan(s):
     N = len(s["players"])
     K = ko_size(s)
-    L = s.get("llSpots") or max(1, K // 4)
+    L = s.get("llSpots")  # None = automatic, 0 = no Lucky Losers
+    if L is None:
+        L = max(1, K // 4)
     L = max(0, min(L, K, N - K))
     return K, K - L, L
 
@@ -314,7 +319,7 @@ def points_ok(pa, pb):
 
 
 def score_sets(sets, T):
-    """Mecz do kilku setów: wpisuje się punkty każdego seta, wynik meczu (np. 2:1) liczy się z nich."""
+    """Match to several sets: the points of every set are entered, the match score (e.g. 2:1) is derived from them."""
     too_many = f"Za dużo setów: mecz kończy się, gdy ktoś wygra {T} sety."
     if len(sets) > 2 * T - 1:
         raise Err(too_many)
@@ -378,7 +383,7 @@ def set_score(s, stage, m_id, sa, sb, admin, pa=None, pb=None, sets=None):
     m["sa"], m["sb"] = (None, None) if clearing else (sa, sb)
     m["pa"], m["pb"] = (None, None) if clearing else (pa, pb)
     m["sets"] = None if clearing else set_list
-    # Czas meczu: start zapisuje organizator, wpisanie wyniku jest końcem.
+    # Match time: the organizer records the start, entering the result is the end.
     if clearing:
         m.pop("t0", None)
         m.pop("t1", None)
@@ -430,16 +435,16 @@ def admin_action(s, body):
                 s["koSize"] = None
             else:
                 v = int(v)
-                if v not in (2, 4, 8, 16, 32):
-                    raise Err("Drabinka może mieć 2, 4, 8, 16 lub 32 miejsca.")
+                if v not in (2, 4, 8, 16, 32, 64):
+                    raise Err("Drabinka może mieć 2, 4, 8, 16, 32 lub 64 miejsca.")
                 if s["phase"] in ("ko", "done") and v != s.get("koSize"):
                     raise Err("Drabinka już ruszyła. Cofnij turniej, aby zmienić jej rozmiar.")
                 s["koSize"] = v
         if "llSpots" in body:
             v = body["llSpots"]
-            v = None if v in (None, "", 0, "auto") else int(v)
-            if v is not None and not (1 <= v <= 16):
-                raise Err("Miejsc dla Lucky Losers może być od 1 do 16.")
+            v = None if v in (None, "", "auto") else int(v)
+            if v is not None and not (0 <= v <= 16):
+                raise Err("Miejsc dla Lucky Losers może być od 0 do 16.")
             if s["phase"] in ("ko", "done"):
                 raise Err("Drabinka już ruszyła. Cofnij do Lucky Losers lub rundy 2, aby to zmienić.")
             if s["phase"] == "ll" and any(m["sa"] is not None for m in s.get("ll", [])):
@@ -529,7 +534,7 @@ def admin_action(s, body):
     elif act == "reset":
         keep = body.get("keepPlayers")
         ns = new_state()
-        for k in ("title", "edition", "prize", "setsToWin", "koSize", "llSpots"):
+        for k in ("title", "edition", "prize", "setsToWin", "scoreMode", "koSize", "llSpots"):
             ns[k] = s.get(k, ns[k])
         if keep:
             ns["players"] = s["players"]
@@ -688,6 +693,6 @@ if __name__ == "__main__":
     if not os.path.exists(STATE_F):
         save(new_state())
     host = "localhost" if BIND in ("127.0.0.1", "0.0.0.0", "::") else BIND
-    print(f"Turniej działa: http://{host}:{PORT}/")
-    print(f"Link organizatora (nie udostępniaj): http://{host}:{PORT}/#admin-{tok}", flush=True)
+    print(f"Tournament is running: http://{host}:{PORT}/")
+    print(f"Organizer link (do not share): http://{host}:{PORT}/#admin-{tok}", flush=True)
     ThreadingHTTPServer((BIND, PORT), H).serve_forever()
