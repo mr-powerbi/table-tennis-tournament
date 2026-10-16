@@ -266,7 +266,6 @@ footer a{color:inherit}
   <div class="ball" aria-hidden="true"></div>
   <div class="wrap">
     <div class="brand"><svg viewBox="0 0 40 40" aria-hidden="true"><ellipse cx="17" cy="16" rx="11" ry="12" transform="rotate(-38 17 16)" fill="currentColor"/><path d="M23 25 l9 9" stroke="currentColor" stroke-width="5" stroke-linecap="round"/><circle cx="32" cy="9" r="4" fill="currentColor" opacity=".55"/></svg>ping-pong</div>
-    <div class="eyebrow" id="edition">Edycja 2026</div>
     <h1 id="title">Firmowy Turniej <em>Tenisa Stołowego</em></h1>
     <div class="meta" id="meta"></div>
   </div>
@@ -437,6 +436,21 @@ function listPlans(btns){
   const more=btns.slice(3);
   return `<div class="planlist">${btns.slice(0,3).join('')}</div>${more.length?`<details class="morep"><summary>${tr(`Pokaż więcej propozycji (${more.length})`,`Show more suggestions (${more.length})`)}</summary><div class="planlist" style="margin-top:8px">${more.join('')}</div></details>`:''}`;
 }
+// groups already drawn: group size and advancing players are fixed, only the bracket size and Lucky Losers can still change
+function groupKPlans(N,D0){
+  const out=[];
+  for(let K=2;K<=Math.min(64,pow2Floor(N));K*=2){
+    if(K<D0||(K===N&&N>4)) continue;
+    const rest=K-D0, m=Math.max(0,Math.min(rest,N-K,16));
+    [...new Set([0,Math.min(m,Math.floor(rest/2))])].forEach(L=>out.push({K,L,D0,rest:rest-L,out:N-K,pct:Math.round(100*K/N)}));
+  }
+  out.sort((a,b)=>Math.abs(a.K/N-.5)-Math.abs(b.K/N-.5)||a.L-b.L);
+  return out.slice(0,6);
+}
+function groupKPlanText(p,N){
+  return tr(`${p.D0} z grup${p.rest?` + ${p.rest} ${plural(p.rest,'najlepszy','najlepszych','najlepszych')} z reszty`:''}${p.L?` + ${p.L} z Lucky Losers (o ${p.L} ${plural(p.L,'miejsce','miejsca','miejsc')} gra ${2*p.L} ${plural(2*p.L,'gracz','graczy','graczy')})`:''} · drabinka na ${p.K} (${p.pct}% graczy)`,
+    `${p.D0} from the groups${p.rest?` + ${p.rest} best of the rest`:''}${p.L?` + ${p.L} via Lucky Losers (${2*p.L} players play for ${p.L} ${p.L===1?'place':'places'})`:''} · bracket of ${p.K} (${p.pct}% of players)`);
+}
 function groupPlanText(p,N){
   return tr(`${p.G} ${plural(p.G,'grupa','grupy','grup')} (${p.layout} ${plural(p.G,'gracz','graczy','graczy')}) · z grupy awansuje ${p.adv}: ${p.D0} bezpośrednio${p.rest?` + ${p.rest} ${plural(p.rest,'najlepszy','najlepszych','najlepszych')} z reszty`:''} · drabinka na ${p.K} (${p.pct}% graczy)`,
     `${p.G} ${p.G===1?'group':'groups'} (${p.layout} players) · ${p.adv} advance${p.adv===1?'s':''} from each: ${p.D0} straight in${p.rest?` + ${p.rest} best of the rest`:''} · bracket of ${p.K} (${p.pct}% of players)`);
@@ -504,7 +518,6 @@ function steps(){
   $('#steps').innerHTML=labels.map(([k,l])=>{const i=PH.indexOf(k);return `<span class="step ${i===cur?'on':i<cur?'done':''}">${l}</span>`}).join('');
 }
 function header(){
-  $('#edition').textContent=tx(S.edition||'');
   const w=tx((S.title||'').trim()).split(/\s+/), cut=w.length>=3?w.length-2:w.length;
   $('#title').innerHTML=esc(w.slice(0,cut).join(' '))+(cut<w.length?` <em>${esc(w.slice(cut).join(' '))}</em>`:'');
   const n=S.players.length;
@@ -545,7 +558,7 @@ function render(){
   $('#infobtn').hidden=ph==='signup';
   const ad=$('#adm');
   if(!S.admin){ if(ad.open) ad.close(); $('#admbody').innerHTML=''; }
-  else if(!(ad.open&&ad.contains(document.activeElement))) $('#admbody').innerHTML=adminPanel();
+  else if(!(ad.open&&ad.contains(document.activeElement)&&/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName))) $('#admbody').innerHTML=adminPanel();
   $('#app').innerHTML=out.join('');
   bind();
 }
@@ -562,7 +575,7 @@ function demoBar(){
 }
 
 function howto(){
-  const prize=S.prize?esc(tx(S.prize)):'', R=roundN(), gsz=S.groupSize||4, adv=S.groupAdvance||2;
+  const R=roundN(), gsz=S.groupSize||4, adv=S.groupAdvance||2;
   const qual=groupsMode()
     ?tr(`<b>Grupy.</b> Gracze są losowani do grup po ok. ${gsz} osoby, a w grupie każdy gra z każdym. Z każdej grupy awansuje ${adv} ${plural(adv,'gracz','graczy','graczy')}.`,`<b>Groups.</b> Players are drawn into groups of about ${gsz} and everyone plays everyone in their group. ${adv} ${adv===1?'player':'players'} from each group advance.`)
     :tr(`<b>Rundy.</b> Losowanie par, a w kolejnych rundach grają ze sobą gracze o takim samym bilansie wygranych (runda 2: wygrani z wygranymi, przegrani z przegranymi). Rund jest ${R}, więc każdy zagra co najmniej ${R} ${plural(R,'mecz','mecze','meczów')}.`,`<b>Rounds.</b> Pairs are drawn, and in later rounds players with the same record play each other (round 2: winners vs winners, losers vs losers). There ${R===1?'is':'are'} ${R} ${R===1?'round':'rounds'}, so everyone plays at least ${R} ${R===1?'match':'matches'}.`);
@@ -574,7 +587,7 @@ function howto(){
   <li>${qual}</li>
   <li>${rank}</li>
   <li>${tr('<b>Lucky Losers</b> (opcjonalnie). Najlepsi spoza bezpośredniego awansu grają między sobą jeden mecz, zwycięzcy uzupełniają drabinkę. Reszta kończy udział.','<b>Lucky Losers</b> (optional). The best players outside direct qualification play each other once; the winners fill up the bracket. The rest are out.')}</li>
-  <li>${tr(`<b>Drabinka.</b> Puchar do końca, z meczem o 3. miejsce. ${S.prize?`Zwycięzca odbiera nagrodę: ${prize}.`:'Zwycięzca zgarnia chwałę.'}`,`<b>Bracket.</b> Knockout to the end, with a 3rd place match. ${S.prize?`The winner takes the prize: ${prize}.`:'The winner takes the glory.'}`)}</li>
+  <li>${tr('<b>Drabinka.</b> Puchar do końca, z meczem o 3. miejsce.','<b>Bracket.</b> Knockout to the end, with a 3rd place match.')}</li>
   <li>${tr('<b>Wyniki</b> po meczu zgłaszacie organizatorowi, on je wpisuje. Strona odświeża się sama.','<b>Results.</b> After a match, tell the organizer and they enter it. The page refreshes by itself.')}</li></ol></details>`;
 }
 
@@ -871,7 +884,7 @@ function podium(){
   const place=(cls,num,id,label,color)=>`<div class="place ${cls}"><div class="wreath">${laurel(color)}<span class="num" style="color:${color}">${num}</span></div><div class="pname">${id?esc(name(id)):'—'}</div><div class="plabel">${label}</div><div class="block">${num}</div></div>`;
   return `<section class="podium-sec"><div class="eyebrow" style="margin:0">${tr('Turniej zakończony','Tournament finished')}</div><h2>${tr('Mistrz','Champion')}: ${esc(name(w))}</h2>
   <div class="podium">${place('p2',2,second,tr('Srebro','Silver'),'var(--silver)')}${place('p1',1,w,tr('Złoto','Gold'),'var(--gold)')}${third?place('p3',3,third,tr('Brąz','Bronze'),'var(--bronze)'):'<div></div>'}</div>
-  <p class="handshake">🏆 ${S.prize?`${tr('Nagroda','Prize')}: ${esc(tx(S.prize))}`:tr('Gratulacje dla zwycięzców!','Congratulations to the winners!')}</p></section>`;
+  <p class="handshake">🏆 ${tr('Gratulacje dla zwycięzców!','Congratulations to the winners!')}</p></section>`;
 }
 
 function adminPanel(){
@@ -881,10 +894,12 @@ function adminPanel(){
   const bracketLocked=['ko','done'].includes(p);
   const kOpts=[]; for(let k=2;k<=Math.min(64,pow2Floor(N));k*=2) if(k<=Math.max(2,N)) kOpts.push([String(k),`${k} ${tr(plural(k,'miejsce','miejsca','miejsc'),'places')} · ${Math.round(100*k/Math.max(N,1))}% ${tr('graczy','of players')}`]);
   const llOpts=llOptionsFor(S.K,N,{groups:fmt==='groups',D0:S.D0||0});
-  const rPlans=bracketLocked?[]:bracketPlans(N), gPlans=bracketLocked?[]:groupPlans(N);
+  const gLocked=fmt==='groups'&&locked, rPlans=bracketLocked?[]:bracketPlans(N), gPlans=(bracketLocked||gLocked)?[]:groupPlans(N);
+  const realD0=(S.groups||[]).reduce((n,g)=>n+Math.min(gadv,g.ids.length),0);
+  const gkPlans=(gLocked&&!bracketLocked)?groupKPlans(N,realD0):[];
   const head=tr(`Propozycje dla ${N} ${plural(N,'gracza','graczy','graczy')}`,`Suggestions for ${N} ${N===1?'player':'players'}`);
-  const plansHtml=(rPlans.length||gPlans.length)?`<div class="plans" id="plans-rounds" ${fmt==='groups'?'hidden':''}><div class="qlbl">${head} · ${tr('losowe rundy','random-opponent rounds')}</div>${listPlans(rPlans.map(pl=>`<button type="button" class="plan ${fmt==='rounds'&&pl.K===S.K&&pl.L===S.L?'on':''}" data-plan="${pl.K}:${pl.L}"><b>${pl.rec?'★ ':''}${pl.K} ${tr(plural(pl.K,'miejsce w drabince','miejsca w drabince','miejsc w drabince'),'bracket places')}${pl.rec?' · '+tr('zalecane','recommended'):''}</b><span>${planText(pl,N)}</span></button>`))}</div>
-  <div class="plans" id="plans-groups" ${fmt==='groups'?'':'hidden'}><div class="qlbl">${head} · ${tr('grupy','groups')}</div>${listPlans(gPlans.map((gp,i)=>`<button type="button" class="plan ${fmt==='groups'&&gp.size===gsz&&gp.adv===gadv&&gp.K===S.K?'on':''}" data-gplan="${gp.size}:${gp.adv}:${gp.K}"><b>${i===0?'★ ':''}${tr(`Grupy po ok. ${gp.size}`,`Groups of about ${gp.size}`)}${i===0?' · '+tr('zalecane','recommended'):''}</b><span>${groupPlanText(gp,N)}</span></button>`))}</div>`:'';
+  const plansHtml=(rPlans.length||gPlans.length||gkPlans.length)?`<div class="plans" id="plans-rounds" ${fmt==='groups'?'hidden':''}><div class="qlbl">${head} · ${tr('losowe rundy','random-opponent rounds')}</div>${listPlans(rPlans.map(pl=>`<button type="button" class="plan ${fmt==='rounds'&&pl.K===S.K&&pl.L===S.L?'on':''}" data-plan="${pl.K}:${pl.L}"><b>${pl.rec?'★ ':''}${pl.K} ${tr(plural(pl.K,'miejsce w drabince','miejsca w drabince','miejsc w drabince'),'bracket places')}${pl.rec?' · '+tr('zalecane','recommended'):''}</b><span>${planText(pl,N)}</span></button>`))}</div>
+  <div class="plans" id="plans-groups" ${fmt==='groups'?'':'hidden'}><div class="qlbl">${head} · ${tr('grupy','groups')}</div>${listPlans(gkPlans.map(pl=>`<button type="button" class="plan ${pl.K===S.K&&pl.L===S.L?'on':''}" data-plan="${pl.K}:${pl.L}"><b>${pl.K} ${tr(plural(pl.K,'miejsce w drabince','miejsca w drabince','miejsc w drabince'),'bracket places')}</b><span>${groupKPlanText(pl,N)}</span></button>`).concat(gPlans.map((gp,i)=>`<button type="button" class="plan ${fmt==='groups'&&gp.size===gsz&&gp.adv===gadv&&gp.K===S.K?'on':''}" data-gplan="${gp.size}:${gp.adv}:${gp.K}"><b>${i===0?'★ ':''}${tr(`Grupy po ok. ${gp.size}`,`Groups of about ${gp.size}`)}${i===0?' · '+tr('zalecane','recommended'):''}</b><span>${groupPlanText(gp,N)}</span></button>`)))}</div>`:'';
   const late=['groups',...roundKeys()].includes(p);
   const lateInfo=p==='groups'?tr('Dołączy do najmniejszej grupy i zagra z każdym jej członkiem.','They join the smallest group and play everyone in it.')
     :p==='r1'?tr('Dostanie mecz w rundzie 1 (z osobą bez pary albo z losowym rywalem, liczony tylko dla niego). W kolejnych rundach zagra normalnie.','They get a round 1 match (against someone without a partner or a random opponent, counted only for them). They play the following rounds normally.')
@@ -894,8 +909,6 @@ function adminPanel(){
   ${plansHtml}
   <form id="setf" class="grid2">
     <label class="f">${tr('Nazwa turnieju','Tournament name')}<input id="s_title" value="${esc(S.title)}" maxlength="120"></label>
-    <label class="f">${tr('Edycja','Edition')}<input id="s_ed" value="${esc(S.edition)}" maxlength="60"></label>
-    <label class="f">${tr('Nagroda (opcjonalnie)','Prize (optional)')}<input id="s_prize" value="${esc(S.prize||'')}" maxlength="80" placeholder="${tr('np. puchar i wieczna chwała','e.g. trophy and eternal glory')}"></label>
     <label class="f">${tr('Mecz do wygranych setów','Sets to win a match')}<select id="s_sets" ${locked?'disabled':''}>${[1,2,3].map(v=>`<option value="${v}" ${v===T()?'selected':''}>${v}</option>`).join('')}</select></label>
     <label class="f">${tr('Wpisywanie wyników','Score entry')}<select id="s_mode"><option value="points" ${mode==='points'?'selected':''}>${T()===1?tr('Punkty seta','Set points'):tr('Punkty każdego seta','Points of every set')}</option><option value="sets" ${mode==='sets'?'selected':''}>${T()===1?tr('Tylko zwycięzca (szybciej)','Winner only (faster)'):tr('Tylko wynik w setach (szybciej)','Sets only (faster)')}</option></select></label>
     <label class="f">${tr('Format kwalifikacji','Qualification format')}<select id="s_fmt" ${locked?'disabled':''}><option value="rounds" ${fmt==='rounds'?'selected':''}>${tr('Losowe rundy','Random-opponent rounds')}</option><option value="groups" ${fmt==='groups'?'selected':''}>${tr('Grupy (każdy z każdym)','Groups (round-robin)')}</option></select></label>
@@ -977,7 +990,7 @@ function bind(){
     $('#s_ll').addEventListener('change',()=>{ $('#s_ll').dataset.touched='1'; });
   }
   const sf=$('#setf'); if(sf) sf.addEventListener('submit',e=>{e.preventDefault();
-    const dlv=$('#s_dl').value; const body={action:'settings',title:$('#s_title').value,edition:$('#s_ed').value,prize:$('#s_prize').value,scoreMode:$('#s_mode').value};
+    const dlv=$('#s_dl').value; const body={action:'settings',title:$('#s_title').value,scoreMode:$('#s_mode').value};
     // format first, then sizes; bracket and Lucky Losers places are only sent once the organizer has picked them
     if(!$('#s_fmt').disabled){ body.format=$('#s_fmt').value; body.rounds=+$('#s_rounds').value; body.groupSize=+$('#s_gsize').value; body.groupAdvance=+$('#s_gadv').value; }
     if(!$('#s_k').disabled&&($('#s_k').dataset.touched||$('#s_k').value!==$('#s_k').dataset.init)) body.koSize=+$('#s_k').value;
@@ -1085,15 +1098,15 @@ function openPoints(stage,m){
   });
 }
 function confirmBox(what){
-  const [act,to]=what.split(':');
+  const [act,to]=what.split(':'), k=to?to.slice(1):'';
   const txt={
     reset:[tr('Nowy turniej?','New tournament?'),tr('Wszystkie mecze zostaną usunięte. Możesz zachować listę zapisanych osób.','All matches will be deleted. You can keep the list of signed-up players.')],
     reopen:[tr('Wrócić do zapisów?','Back to sign-ups?'),tr('Usunie losowanie i wszystkie wyniki. Lista zawodników zostaje.','This removes the draw and all results. The player list stays.')],
-    rollback:[to==='ll'?tr('Cofnąć do Lucky Losers?','Roll back to Lucky Losers?'):to==='groups'?tr('Cofnąć do grup?','Roll back to the groups?'):tr(`Cofnąć do rundy ${to.slice(1)}?`,`Roll back to round ${to.slice(1)}?`),
+    rollback:[to==='ll'?tr('Cofnąć do Lucky Losers?','Roll back to Lucky Losers?'):to==='groups'?tr('Cofnąć do grup?','Roll back to the groups?'):tr(`Cofnąć do rundy ${k}?`,`Roll back to round ${k}?`),
       to==='ll'?tr('Usunie drabinkę. Wyniki Lucky Losers zostają.','This removes the bracket. Lucky Losers results stay.')
       :to==='groups'?tr('Usunie Lucky Losers i drabinkę. Wyniki grup zostają.','This removes Lucky Losers and the bracket. Group results stay.')
-      :+to.slice(1)>=roundN()?tr(`Usunie Lucky Losers i drabinkę. Wyniki rund 1–${to.slice(1)} zostają.`,`This removes Lucky Losers and the bracket. Results of rounds 1–${to.slice(1)} stay.`)
-      :tr(`Usunie kolejne rundy, Lucky Losers i drabinkę. Wyniki rund 1–${to.slice(1)} zostają.`,`This removes the following rounds, Lucky Losers and the bracket. Results of rounds 1–${to.slice(1)} stay.`)]}[act];
+      :+k>=roundN()?tr(`Usunie Lucky Losers i drabinkę. Wyniki rund 1–${k} zostają.`,`This removes Lucky Losers and the bracket. Results of rounds 1–${k} stay.`)
+      :tr(`Usunie kolejne rundy, Lucky Losers i drabinkę. Wyniki rund 1–${k} zostają.`,`This removes the following rounds, Lucky Losers and the bracket. Results of rounds 1–${k} stay.`)]}[act];
   showDlg(`<h3>${txt[0]}</h3><p class="sub">${txt[1]}</p><div class="err" id="derr"></div><div class="row">
     <button type="button" class="ghost" id="dcan">${tr('Anuluj','Cancel')}</button>
     ${act==='reset'?`<button type="button" class="ghost danger" id="dok2">${tr('Wyczyść też zawodników','Clear players too')}</button><button type="button" class="btn" id="dok">${tr('Zachowaj zawodników','Keep players')}</button>`:`<button type="button" class="btn" id="dok">${tr('Tak, cofnij','Yes, roll back')}</button>`}</div>`,
