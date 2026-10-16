@@ -23,6 +23,7 @@ function playOut(s) {
   return s;
 }
 
+const entrants = (s) => new Set([...(s.ko.pre || []).flatMap((m) => [m.a, m.b]), ...s.ko.rounds[0].flatMap((m) => [m.a, m.b])].filter(Boolean));
 let checked = 0;
 for (let n = 3; n <= 40; n++) {
   store.clear();
@@ -31,8 +32,7 @@ for (let n = 3; n <= 40; n++) {
   s = playOut(s);
   const played = s.ranking.map((r) => r.played);
   assert.ok(Math.min(...played) >= 2, `n=${n}: everyone plays at least two matches`);
-  const first = new Set(s.ko.rounds[0].flatMap((m) => [m.a, m.b]));
-  assert.equal(first.size, s.K, `n=${n}: full bracket`);
+  assert.equal(entrants(s).size, s.K, `n=${n}: full bracket`);
   checked++;
 }
 
@@ -85,7 +85,7 @@ s = E.request('api/admin', { action: 'settings', koSize: 8, llSpots: 3 });
 assert.deepEqual([s.K, s.D, s.L], [8, 5, 3]);
 s = E.request('api/admin', { action: 'settings', llSpots: 'auto' });
 assert.deepEqual([s.K, s.D, s.L], [8, 6, 2]);
-assert.throws(() => E.request('api/admin', { action: 'settings', llSpots: 17 }));
+assert.throws(() => E.request('api/admin', { action: 'settings', llSpots: 65 }));
 assert.throws(() => E.request('api/admin', { action: 'settings', koSize: 12 }));
 
 // The organizer picks how many random-opponent rounds are played: everyone plays that many matches.
@@ -125,13 +125,16 @@ for (const [n, size, adv] of [[6, 3, 2], [9, 3, 2], [12, 4, 2], [13, 4, 1], [20,
   const sizes = s.groups.map((g) => g.ids.length);
   assert.ok(Math.max(...sizes) - Math.min(...sizes) <= 1, `${tag}: balanced groups`);
   for (const g of s.groups) assert.equal(s.gm.filter((m) => m.g === g.id).length, g.ids.length * (g.ids.length - 1) / 2, `${tag}: round robin`);
-  const K0 = s.K;
+  const K0 = s.K, grp = {};
+  s.groups.forEach((g) => g.ids.forEach((id) => (grp[id] = g.id)));
+  s = E.simulateStage(); // the whole group stage
+  while (s.phase === 'll') s = E.simulateStage();
+  // the bracket has just been built: only the pairs known now count (play-in winners are not known yet)
+  const clashes = [...(s.ko.pre || []), ...s.ko.rounds[0]].filter((m) => m.a && m.b && grp[m.a] === grp[m.b]).length;
+  assert.ok(clashes <= 1, `${tag}: avoid same-group first-round pairs (${clashes})`);
   s = playOut(s);
   assert.equal(s.phase, 'done', tag);
-  assert.equal(new Set(s.ko.rounds[0].flatMap((m) => [m.a, m.b])).size, K0, `${tag}: full bracket`);
-  const grp = {}; s.groups.forEach((g) => g.ids.forEach((id) => (grp[id] = g.id)));
-  const clashes = s.ko.rounds[0].filter((m) => grp[m.a] === grp[m.b]).length;
-  assert.ok(clashes <= 1, `${tag}: avoid same-group first-round pairs (${clashes})`);
+  assert.equal(entrants(s).size, K0, `${tag}: full bracket`);
   // everyone plays everyone in their group
   assert.ok(s.ranking.every((r) => r.played === s.groups.find((g) => g.id === r.group).ids.length - 1), tag);
 }
@@ -148,6 +151,92 @@ assert.equal(s.phase, 'done');
 // Settings are locked after the draw.
 assert.throws(() => E.request('api/admin', { action: 'settings', format: 'rounds' }));
 assert.throws(() => E.request('api/admin', { action: 'settings', rounds: 3 }));
+
+// Knockout stage: the organizer picks the share of players that advance, always an even number rounded up.
+{
+  const pcts = [70, 60, 50, 45, 40, 35, 30, 25, 20];
+  for (const n of [3, 5, 8, 11, 16, 20, 21, 33, 40]) {
+    for (const pct of pcts) {
+      store.clear();
+      E.freshWithPlayers(Array.from({ length: n }, (_, i) => `Gracz ${i}`));
+      E.request('api/admin', { action: 'settings', advancePct: pct, koSize: null });
+      s = E.request('api/admin', { action: 'draw' });
+      const want = Math.max(2, Math.min(Math.ceil(n * pct / 100 - 1e-9) + (Math.ceil(n * pct / 100 - 1e-9) % 2), n - (n % 2)));
+      assert.equal(s.D, want, `n=${n} ${pct}%: direct qualifiers`);
+      assert.equal(s.D % 2, 0); assert.equal(s.L, 0); assert.equal(s.K, s.D);
+      s = playOut(s);
+      assert.equal(s.phase, 'done', `n=${n} ${pct}%`);
+      // single elimination: M-1 matches, the best seeds get the byes, nobody is missing
+      const M = s.K, koMatches = (s.ko.pre || []).length + s.ko.rounds.flat().length;
+      assert.equal(koMatches, M - 1, `n=${n} ${pct}%: M-1 matches (M=${M})`);
+      assert.equal(entrants(s).size, M);
+      if (s.ko.pre) {
+        const order = s.ranking.map((r) => r.id), rank = (id) => order.indexOf(id);
+        const prePlayers = new Set(s.ko.pre.flatMap((m) => [m.a, m.b]));
+        const byes = [...entrants(s)].filter((id) => !prePlayers.has(id));
+        assert.ok(Math.max(...byes.map(rank)) < Math.min(...[...prePlayers].map(rank)), `n=${n} ${pct}%: byes go to the best of the table`);
+      }
+    }
+  }
+}
+// Every even number of qualifiers works as a bracket (6, 10, 12, 14, ...), including the third-place match.
+for (const [n, pct] of [[12, 50], [20, 50], [24, 60], [30, 50], [40, 70]]) {
+  store.clear();
+  E.freshWithPlayers(Array.from({ length: n }, (_, i) => `Gracz ${i}`));
+  E.request('api/admin', { action: 'settings', advancePct: pct, koSize: null });
+  s = playOut(E.request('api/admin', { action: 'draw' }));
+  assert.ok(s.ko.rounds[s.ko.rounds.length - 1][0].sa !== null, `n=${n}: final played`);
+  if (s.K >= 4) assert.ok(s.ko.third && s.ko.third.sa !== null, `n=${n}: third-place match played`);
+}
+
+// Lucky Losers: yes/no, decided by a play-off match or simply by the table, number chosen by the organizer.
+for (const n of [12, 20, 26, 33]) {
+  for (const mode of ['playoff', 'table']) {
+    store.clear();
+    E.freshWithPlayers(Array.from({ length: n }, (_, i) => `Gracz ${i}`));
+    E.request('api/admin', { action: 'settings', advancePct: 40, koSize: null, luckyLosers: true, llMode: mode });
+    let st = E.request('api/admin', { action: 'draw' });
+    const D = st.D, pool = n - D, tag = `n=${n} ${mode}`;
+    assert.ok(st.L >= 1 && (D + st.L) % 2 === 0, `${tag}: even bracket, L=${st.L}`);
+    assert.equal(st.llMode, mode); assert.equal(st.llPool, pool); assert.equal(st.K, D + st.L);
+    const L = st.L;
+    st = playOut(st);
+    assert.equal(st.phase, 'done', tag);
+    assert.equal(entrants(st).size, D + L, `${tag}: bracket size`);
+    if (mode === 'table') assert.equal(st.ll.length, 0, `${tag}: no Lucky Losers matches`);
+    else assert.equal(st.ll.length, L, `${tag}: one match per Lucky Loser place`);
+    // explicit number, capped by the pool (and halved in playoff mode)
+    store.clear();
+    E.freshWithPlayers(Array.from({ length: n }, (_, i) => `Gracz ${i}`));
+    E.request('api/admin', { action: 'settings', advancePct: 40, koSize: null, luckyLosers: true, llMode: mode, llSpots: 2 });
+    st = E.request('api/admin', { action: 'draw' });
+    assert.equal(st.L, 2, `${tag}: chosen number of Lucky Losers`);
+    // Lucky Losers off ignores the number
+    E.request('api/admin', { action: 'settings', luckyLosers: false });
+    assert.equal(E.request('api/state').L, 0);
+  }
+}
+assert.throws(() => E.request('api/admin', { action: 'settings', advancePct: 3 }));
+assert.throws(() => E.request('api/admin', { action: 'settings', llMode: 'nonsense' }));
+
+// Groups: the Lucky Losers come from the players right behind the qualifiers (the third places).
+for (const [n, size, adv] of [[20, 4, 2], [24, 4, 2], [26, 4, 2]]) {
+  store.clear();
+  E.freshWithPlayers(Array.from({ length: n }, (_, i) => `Gracz ${i}`));
+  E.request('api/admin', { action: 'settings', format: 'groups', groupSize: size, groupAdvance: adv, koSize: null, luckyLosers: true, llMode: 'table' });
+  s = E.request('api/admin', { action: 'draw' });
+  const G = s.groups.length;
+  assert.equal(s.D, G * adv, `n=${n}: direct qualifiers from the groups`);
+  assert.equal(s.llPool, G, `n=${n}: one third place per group`);
+  assert.ok(s.L >= 1 && s.L <= G && (s.D + s.L) % 2 === 0);
+  s = playOut(s);
+  assert.equal(s.phase, 'done');
+}
+// recommendation: closest to half of the players
+store.clear();
+E.freshWithPlayers(Array.from({ length: 20 }, (_, i) => `Gracz ${i}`));
+assert.equal(E.request('api/state').recPct, 50);
+assert.equal(E.request('api/state').D, 10);
 
 // The sample demo data loads and is a finished tournament.
 store.clear();

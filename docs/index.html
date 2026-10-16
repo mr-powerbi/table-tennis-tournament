@@ -174,6 +174,8 @@ details.statsbox .stats{margin-bottom:16px}
 .gcards{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))}
 .gcard{border:1px solid var(--line);border-radius:var(--r);padding:12px;background:var(--surface);min-width:0}
 .gcard .tablewrap{margin-top:8px}
+.kobox{border:1px solid var(--line);border-radius:var(--r);padding:12px;background:var(--surface)}
+.kobox .ll-opts[hidden]{display:none}
 .plans{display:grid;gap:8px}
 .plans[hidden]{display:none}
 .morep summary{cursor:pointer;font-weight:700;font-size:.85rem;color:var(--coral);padding:6px 0}
@@ -313,7 +315,11 @@ const ERR_EN={
 'Format meczu można zmienić tylko przed losowaniem.':'The match format can only be changed before the draw.',
 'Drabinka może mieć 2, 4, 8, 16, 32 lub 64 miejsca.':'The bracket can have 2, 4, 8, 16, 32 or 64 places.',
 'Drabinka już ruszyła. Cofnij turniej, aby zmienić jej rozmiar.':'The bracket has already started. Roll the tournament back to change its size.',
-'Miejsc dla Lucky Losers może być od 0 do 16.':'Lucky Losers places can be from 0 to 16.',
+'Miejsc dla Lucky Losers może być od 0 do 64.':'Lucky Losers places can be from 0 to 64.',
+'Odsetek awansujących musi mieścić się między 5% a 95%.':'The share of advancing players must be between 5% and 95%.',
+'Lucky Losers mogą się dogrywać albo awansować z tabeli.':'Lucky Losers either play off or advance by the table.',
+'Drabinka już ruszyła. Cofnij turniej, aby zmienić jej ustawienia.':'The bracket has already started. Roll the tournament back to change its settings.',
+'W Lucky Losers są już wyniki. Cofnij turniej, aby zmienić ustawienia drabinki.':'Lucky Losers already has results. Roll the tournament back to change the bracket settings.',
 'Drabinka już ruszyła. Cofnij do Lucky Losers lub rundy 2, aby to zmienić.':'The bracket has already started. Roll back to Lucky Losers or round 2 to change this.',
 'W Lucky Losers są już wyniki. Cofnij do rundy 2, aby zmienić liczbę miejsc.':'Lucky Losers already has results. Roll back to round 2 to change the number of places.',
 'Błędna data.':'Invalid date.',
@@ -391,114 +397,59 @@ async function demoBoot(){
   catch(e){ TTEngine.freshWithPlayers(DEMO_NAMES); }
 }
 const EXTRA_NAMES=['Michał S.','Natalia B.','Oskar D.','Weronika K.','Adrian L.','Julia P.','Dominik R.','Alicja M.','Sebastian T.','Magda Z.','Karol W.','Iza H.'];
-// ---------- bracket / Lucky Losers sizing, derived from the number of players ----------
-const pow2Floor=n=>{ let k=1; while(k*2<=n) k*=2; return Math.max(k,2); };
-const defaultK=n=>{ let k=2; while(k*2<=Math.max(2,Math.floor(n*0.75))) k*=2; return Math.min(k,pow2Floor(n)); };
-const autoL=(K,N)=>Math.max(0,Math.min(Math.max(1,Math.floor(K/4)),K,N-K));
-const maxL=(K,N)=>Math.max(0,Math.min(K,N-K,16));
-function bracketPlans(N){
-  if(N<3) return [];
-  let ks=[]; for(let k=2;k<=Math.min(64,pow2Floor(N));k*=2){ if(k>N||(k===N&&N>4)||k/N<0.15) continue; ks.push(k); }
-  if(!ks.length) ks=[2];
-  const rk=defaultK(N), rec={K:rk,L:autoL(rk,N)};
-  ks.sort((a,b)=>(b===rk)-(a===rk)||Math.abs(a/N-.5)-Math.abs(b/N-.5)||b-a);
-  const plans=[];
-  ks.slice(0,3).forEach(K=>{
-    const a=autoL(K,N), m=maxL(K,N), more=Math.min(m,Math.floor(K/2));
-    // automatic, no Lucky Losers, and (for the recommended size) a variant with more Lucky Losers spots
-    const Ls=[a,0].concat(K===rk?[more]:[]);
-    [...new Set(Ls)].filter(L=>L>=0&&L<=m&&K-L>=Math.ceil(K/2)).forEach(L=>plans.push({K,L,D:K-L,out:N-K,pct:Math.round(100*K/N),rec:K===rec.K&&L===rec.L,auto:L===a}));
-  });
-  return plans.slice(0,8);
-}
-// One list of ready-made (bracket size, Lucky Losers) combinations. In groups mode the size follows from the
-// groups (it is locked), only the Lucky Losers part can be chosen.
-function bracketChoices(N,o){
-  const out=[];
-  if(o.groups){
-    const D0=groupDirectFor(N,o.size,o.adv), K=autoKGroups(N,o.size,o.adv), rest=Math.max(0,K-Math.min(D0,K)), m=Math.max(0,Math.min(rest,N-K,16));
-    out.push({K,D0,rest,Ls:Array.from({length:m+1},(_,L)=>L)});
-  } else {
-    for(let K=2;K<=Math.min(64,pow2Floor(N));K*=2){
-      if(K>N||(K===N&&N>4)) continue;
-      const m=Math.max(0,Math.min(Math.floor(K/2),N-K,16));
-      out.push({K,Ls:Array.from({length:m+1},(_,L)=>L)});
-    }
-  }
-  return out;
-}
-function bracketSelectHtml(N,o,cur){
-  let found=false;
-  const html=bracketChoices(N,o).map(g=>{
-    const items=g.Ls.map(L=>{
-      const v=`${g.K}:${L}`; if(v===cur) found=true;
-      let text;
-      if(o.groups){
-        const best=g.rest-L, parts=tr(`${g.D0} z grup`,`${g.D0} from the groups`)+(best>0?tr(` + ${best} ${plural(best,'najlepszy','najlepszych','najlepszych')} z reszty`,` + ${best} best of the rest`):'')+(L?tr(` + ${L} z Lucky Losers`,` + ${L} via Lucky Losers`):'');
-        text=(L===0?tr('bez Lucky Losers','no Lucky Losers'):tr(`z Lucky Losers (o ${L} ${plural(L,'miejsce','miejsca','miejsc')} gra ${2*L})`,`with Lucky Losers (${2*L} play for ${L} ${L===1?'place':'places'})`))+' — '+parts;
-      } else {
-        text=L===0?tr(`bez Lucky Losers — ${g.K} bezpośrednio`,`no Lucky Losers — ${g.K} straight in`)
-          :tr(`z Lucky Losers — ${g.K-L} bezpośrednio + ${L} z LL (gra ${2*L})`,`with Lucky Losers — ${g.K-L} straight in + ${L} via LL (${2*L} play)`);
-      }
-      return `<option value="${v}" ${v===cur?'selected':''}>${text}</option>`;
-    }).join('');
-    return `<optgroup label="${g.K} ${tr(plural(g.K,'miejsce','miejsca','miejsc'),'places')} · ${Math.round(100*g.K/Math.max(N,1))}% ${tr('graczy','of players')}">${items}</optgroup>`;
-  }).join('');
-  return (found||!cur?'':`<option value="${cur}" selected>${tr('Obecne ustawienie','Current setting')}: ${cur.replace(':',' / ')}</option>`)+html;
-}
-// groups: sizes, qualifiers and a bracket size that fits (mirrors the engine)
+// ---------- knockout stage: who goes through (mirrors the engine) ----------
+const ADV_PCTS=[70,65,60,55,50,45,40,35,30,25,20,15,10];
+const ceilEven=x=>{ const c=Math.ceil(x-1e-9); return c%2?c+1:c; };
+const directFor=(N,pct)=>Math.max(2,Math.min(ceilEven(N*pct/100),N-(N%2)));
+const recPctFor=N=>{ let best=50,bd=Infinity; for(const p of ADV_PCTS){ const d=Math.abs(directFor(N,p)-N/2); if(d<bd-1e-9){bd=d;best=p;} } return best; };
+const recLFor=(pool,mode)=>{ const cap=mode==='playoff'?Math.floor(pool/2):pool; const L=Math.round((pool*(mode==='playoff'?0.25:0.5))/2)*2; return Math.max(0,Math.min(Math.max(L,2),cap)); };
 const groupSizesFor=(N,size)=>{ const G=Math.max(1,Math.floor(N/size+0.5)), base=Math.floor(N/G), extra=N%G; return Array.from({length:G},(_,g)=>base+(g<extra?1:0)); };
 const groupDirectFor=(N,size,adv)=>groupSizesFor(N,size).reduce((n,z)=>n+Math.min(adv,z),0);
-const autoKGroups=(N,size,adv)=>{ let k=2; const d=groupDirectFor(N,size,adv); while(k<d) k*=2; return Math.min(k,pow2Floor(N)); };
-function groupPlans(N){
-  if(N<4) return [];
-  const seen=new Set(), plans=[];
-  [3,4,5,6].forEach(size=>[2,1].forEach(adv=>{
-    const sizes=groupSizesFor(N,size), G=sizes.length, D0=groupDirectFor(N,size,adv), K=autoKGroups(N,size,adv);
-    const tag=G+':'+adv; if(seen.has(tag)||K<D0||K<2||(G===1&&N>6)||K/N<0.2) return; seen.add(tag);
-    const counts={}; sizes.forEach(z=>counts[z]=(counts[z]||0)+1);
-    plans.push({size,adv,G,D0,K,rest:K-D0,pct:Math.round(100*K/N),layout:Object.keys(counts).map(Number).sort((a,b)=>b-a).map(z=>`${counts[z]}×${z}`).join(' + ')});
-  }));
-  plans.sort((a,b)=>Math.abs(a.K/N-.5)-Math.abs(b.K/N-.5)||b.adv-a.adv||a.G-b.G);
-  return plans.slice(0,6);
+// o: {N, groups, size, adv, pct, ll, mode, spots}  ->  {D direct, L Lucky Losers, M players in the knockout stage, mode, pool}
+function koPlanFor(o){
+  const N=o.N; let D,pool;
+  if(o.groups){ D=Math.min(groupDirectFor(N,o.size,o.adv),N); pool=groupSizesFor(N,o.size).filter(z=>z>o.adv).length; }
+  else { D=directFor(N,o.pct); pool=N-D; }
+  let mode=o.mode==='table'?'table':'playoff', L=0;
+  if(o.ll&&pool>=(mode==='playoff'?2:1)){
+    const cap=mode==='playoff'?Math.floor(pool/2):pool;
+    L=Math.max(0,Math.min(o.spots==null?recLFor(pool,mode):o.spots,cap));
+    if((D+L)%2) L=L>1?L-1:(L+1<=cap?L+1:0);
+  }
+  if((D+L)%2){ L+=1; mode='table'; }
+  return {D,L,M:D+L,mode,pool};
 }
-// first three suggestions are visible, the rest is folded away
-function listPlans(btns){
-  const more=btns.slice(3);
-  return `<div class="planlist">${btns.slice(0,3).join('')}</div>${more.length?`<details class="morep"><summary>${tr(`Pokaż więcej propozycji (${more.length})`,`Show more suggestions (${more.length})`)}</summary><div class="planlist" style="margin-top:8px">${more.join('')}</div></details>`:''}`;
+// allowed numbers of Lucky Losers, largest first, keeping the bracket even
+function llCounts(D,pool,mode){ const cap=mode==='playoff'?Math.floor(pool/2):pool, out=[]; for(let L=cap;L>=1;L--) if((D+L)%2===0) out.push(L); return out; }
+const isPow2=x=>x>=2&&(x&(x-1))===0;
+function bracketShape(M){
+  let P=1; while(P*2<=M) P*=2; const R=M-P;
+  return R===0?tr('pełna drabinka','a full bracket')
+    :tr(`runda wstępna: ${2*R} najsłabszych gra ${R} ${plural(R,'mecz','mecze','meczów')}, ${P-R} najlepszych ma wolny los`,`play-in round: the ${2*R} lowest seeds play ${R} ${R===1?'match':'matches'}, the best ${P-R} have a bye`);
 }
-// groups already drawn: group size and advancing players are fixed, only the bracket size and Lucky Losers can still change
-function groupKPlans(N,D0,K){
-  const rest=Math.max(0,K-Math.min(D0,K)), m=Math.max(0,Math.min(rest,N-K,16));
-  return Array.from({length:m+1},(_,L)=>({K,L,D0:Math.min(D0,K),rest:rest-L,out:N-K,pct:Math.round(100*K/N)}));
-}
-function groupKPlanText(p,N){
-  return tr(`${p.D0} z grup${p.rest?` + ${p.rest} ${plural(p.rest,'najlepszy','najlepszych','najlepszych')} z reszty`:''}${p.L?` + ${p.L} z Lucky Losers (o ${p.L} ${plural(p.L,'miejsce','miejsca','miejsc')} gra ${2*p.L} ${plural(2*p.L,'gracz','graczy','graczy')})`:''} · drabinka na ${p.K} (${p.pct}% graczy)`,
-    `${p.D0} from the groups${p.rest?` + ${p.rest} best of the rest`:''}${p.L?` + ${p.L} via Lucky Losers (${2*p.L} players play for ${p.L} ${p.L===1?'place':'places'})`:''} · bracket of ${p.K} (${p.pct}% of players)`);
-}
-function groupPlanText(p,N){
-  return tr(`${p.G} ${plural(p.G,'grupa','grupy','grup')} (${p.layout} ${plural(p.G,'gracz','graczy','graczy')}) · z grupy awansuje ${p.adv}: ${p.D0} bezpośrednio${p.rest?` + ${p.rest} ${plural(p.rest,'najlepszy','najlepszych','najlepszych')} z reszty`:''} · drabinka na ${p.K} (${p.pct}% graczy)`,
-    `${p.G} ${p.G===1?'group':'groups'} (${p.layout} players) · ${p.adv} advance${p.adv===1?'s':''} from each: ${p.D0} straight in${p.rest?` + ${p.rest} best of the rest`:''} · bracket of ${p.K} (${p.pct}% of players)`);
+function koSummary(N,plan){
+  return tr(`Do fazy pucharowej: ${plan.D} bezpośrednio${plan.L?` + ${plan.L} Lucky Losers`:''} = ${plan.M} ${plural(plan.M,'gracz','graczy','graczy')} (${Math.round(100*plan.M/N)}% pola). ${bracketShape(plan.M).replace(/^./,c=>c.toUpperCase())}.`,
+    `Knockout stage: ${plan.D} direct${plan.L?` + ${plan.L} Lucky Losers`:''} = ${plan.M} players (${Math.round(100*plan.M/N)}% of the field). ${bracketShape(plan.M).replace(/^./,c=>c.toUpperCase())}.`);
 }
 function fmtInfoText(fmt,N,R,size,adv){
-  if(fmt==='groups'){ const sizes=groupSizesFor(N,size); const K=autoKGroups(N,size,adv); return tr(`Podział: ${sizes.length} ${plural(sizes.length,'grupa','grupy','grup')} (${sizes.join(' + ')} graczy), awansuje ${groupDirectFor(N,size,adv)}. Drabinka na ${K} ${plural(K,'miejsce','miejsca','miejsc')} wynika z grup i jest zablokowana.`,`Layout: ${sizes.length} ${sizes.length===1?'group':'groups'} (${sizes.join(' + ')} players), ${groupDirectFor(N,size,adv)} advance directly. The bracket of ${K} follows from the groups and is locked.`); }
+  if(fmt==='groups'){ const sizes=groupSizesFor(N,size); return tr(`Podział: ${sizes.length} ${plural(sizes.length,'grupa','grupy','grup')} (${sizes.join(' + ')} graczy), z grup awansuje bezpośrednio ${groupDirectFor(N,size,adv)}.`,`Layout: ${sizes.length} ${sizes.length===1?'group':'groups'} (${sizes.join(' + ')} players), ${groupDirectFor(N,size,adv)} advance directly from the groups.`); }
   return tr(`Każdy zagra co najmniej ${R} ${plural(R,'mecz','mecze','meczów')} z losowymi rywalami.`,`Everyone plays at least ${R} ${R===1?'match':'matches'} against random opponents.`);
 }
-function planText(pl,N){
-  const places=n=>n===1?'place':'places';
-  return tr(`${pl.D} bezpośrednio${pl.L?` + ${pl.L} z Lucky Losers (o ${pl.L} ${plural(pl.L,'miejsce','miejsca','miejsc')} gra ${2*pl.L} ${plural(2*pl.L,'gracz','graczy','graczy')})`:''} · awansuje ${pl.pct}% (${pl.K} z ${N}), odpada ${pl.out}`,
-    `${pl.D} straight in${pl.L?` + ${pl.L} via Lucky Losers (${2*pl.L} players play for ${pl.L} ${places(pl.L)})`:''} · ${pl.pct}% advance (${pl.K} of ${N}), ${pl.out} out`);
-}
+const llNOptions=(D,pool,mode,sel)=>{
+  const opts=llCounts(D,pool,mode), rec=recLFor(pool,mode);
+  let best=opts.length?opts.reduce((b,x)=>Math.abs(x-rec)<Math.abs(b-rec)?x:b):null;
+  const pick=opts.includes(sel)?sel:best;
+  return opts.map(L=>`<option value="${L}" ${L===pick?'selected':''}>${L} · ${Math.round(100*L/Math.max(pool,1))}% ${tr('puli','of the pool')} (${pool})${isPow2(D+L)?' · '+tr('pełna drabinka','full bracket'):''}${L===best?' · '+tr('zalecane','recommended'):''}</option>`).join('');
+};
 function randomTournament(){
   const rnd=(a,b)=>a+Math.floor(Math.random()*(b-a+1));
   const n=rnd(6,32), pool=[...DEMO_NAMES,...EXTRA_NAMES];
   for(let i=pool.length-1;i>0;i--){ const j=rnd(0,i); [pool[i],pool[j]]=[pool[j],pool[i]]; }
   TTEngine.freshWithPlayers(pool.slice(0,n));
-  const sets=[1,1,1,2,3][rnd(0,4)];
-  const gps=groupPlans(n), grp=gps.length&&Math.random()<.4?gps[rnd(0,gps.length-1)]:null;
-  const plans=bracketPlans(n), pl=plans.length?plans[rnd(0,plans.length-1)]:null;
-  const settings={action:'settings',setsToWin:sets,scoreMode:Math.random()<.65?'points':'sets',
-    ...(grp?{format:'groups',groupSize:grp.size,groupAdvance:grp.adv,koSize:grp.K,llSpots:0}:{format:'rounds',rounds:rnd(1,4),...(pl?{koSize:pl.K,llSpots:pl.L}:{})})};
+  const sets=[1,1,1,2,3][rnd(0,4)], groups=Math.random()<.4;
+  const settings={action:'settings',setsToWin:sets,scoreMode:Math.random()<.65?'points':'sets',koSize:null,llSpots:null,
+    luckyLosers:Math.random()<.5,llMode:Math.random()<.5?'playoff':'table',
+    ...(groups?{format:'groups',groupSize:rnd(3,5),groupAdvance:rnd(1,2)}:{format:'rounds',rounds:rnd(1,4),advancePct:ADV_PCTS[rnd(2,9)]})};
   try{ TTEngine.request('api/admin',settings); }catch(e){ TTEngine.request('api/admin',{action:'settings',setsToWin:sets}); }
   const st=TTEngine.request('api/admin',{action:'draw'});
   randomTournament.info={n,sets:st.setsToWin,K:st.K,L:st.L,format:st.format,rounds:st.rounds};
@@ -537,7 +488,7 @@ const PH=['signup','groups','r1','r2','r3','r4','r5','r6','qual','ll','ko','done
 function steps(){
   const labels=[['signup',tr('Zapisy','Sign-ups')]];
   if(groupsMode()) labels.push(['groups',tr('Grupy','Groups')]); else roundKeys().forEach(k=>labels.push([k,stg(k)]));
-  if(S.L>0||S.phase==='ll') labels.push(['ll','Lucky Losers']);
+  if((S.L>0&&S.llMode==='playoff')||S.phase==='ll') labels.push(['ll','Lucky Losers']);
   labels.push(['ko',tr('Drabinka','Bracket')],['done','Podium']);
   const cur=PH.indexOf(S.phase);
   $('#steps').innerHTML=labels.map(([k,l])=>{const i=PH.indexOf(k);return `<span class="step ${i===cur?'on':i<cur?'done':''}">${l}</span>`}).join('');
@@ -547,7 +498,7 @@ function header(){
   $('#title').innerHTML=esc(w.slice(0,cut).join(' '))+(cut<w.length?` <em>${esc(w.slice(cut).join(' '))}</em>`:'');
   const n=S.players.length;
   const chips=[`🏓 ${n} ${pn(n,['zawodnik','zawodników','zawodników'],['player','players'])}`,...(T()===1?[tr('Mecz: 1 set do 11 punktów','Match: 1 set to 11 points')]:[tr(`Mecz do ${T()} wygranych setów`,`Match: first to ${T()} sets`),tr('Set do 11 punktów','Set to 11 points')])];
-  if(n>=3) chips.push(tr(`Drabinka: ${S.K} ${plural(S.K,'miejsce','miejsca','miejsc')}`,`Bracket: ${S.K} ${S.K===1?'place':'places'}`));
+  if(n>=3) chips.push(tr(`Faza pucharowa: ${S.K} ${plural(S.K,'gracz','graczy','graczy')}`,`Knockout: ${S.K} players`));
   if(n>=3) chips.push(groupsMode()?tr(`Grupy po ok. ${S.groupSize||4}`,`Groups of about ${S.groupSize||4}`):tr(`${roundN()} ${plural(roundN(),'runda','rundy','rund')}`,`${roundN()} ${roundN()===1?'round':'rounds'}`));
   if(S.phase==='signup'&&S.deadline) chips.push(tr(`Zapisy do ${fmtDate(S.deadline)}`,`Sign-ups until ${fmtDate(S.deadline)}`));
   $('#meta').innerHTML=chips.map(c=>`<span class="chip">${esc(c)}</span>`).join('');
@@ -605,14 +556,14 @@ function howto(){
     ?tr(`<b>Grupy.</b> Gracze są losowani do grup po ok. ${gsz} osoby, a w grupie każdy gra z każdym. Z każdej grupy awansuje ${adv} ${plural(adv,'gracz','graczy','graczy')}.`,`<b>Groups.</b> Players are drawn into groups of about ${gsz} and everyone plays everyone in their group. ${adv} ${adv===1?'player':'players'} from each group advance.`)
     :tr(`<b>Rundy.</b> Losowanie par, a w kolejnych rundach grają ze sobą gracze o takim samym bilansie wygranych (runda 2: wygrani z wygranymi, przegrani z przegranymi). Rund jest ${R}, więc każdy zagra co najmniej ${R} ${plural(R,'mecz','mecze','meczów')}.`,`<b>Rounds.</b> Pairs are drawn, and in later rounds players with the same record play each other (round 2: winners vs winners, losers vs losers). There ${R===1?'is':'are'} ${R} ${R===1?'round':'rounds'}, so everyone plays at least ${R} ${R===1?'match':'matches'}.`);
   const rank=groupsMode()
-    ?tr('<b>Awans.</b> W grupie liczą się zwycięstwa, potem bilans setów lub punktów. Brakujące miejsca w drabince zajmują najlepsi z reszty, porównywani średnimi z meczu, bo grupy mogą mieć różną wielkość.','<b>Qualification.</b> In a group: wins first, then set or point difference. Missing bracket places go to the best of the rest, compared by per-match averages because groups can differ in size.')
+    ?tr('<b>Awans.</b> W grupie liczą się zwycięstwa, potem bilans setów lub punktów. Lucky Losers (np. z trzecich miejsc) są porównywani średnimi z meczu, bo grupy mogą mieć różną wielkość.','<b>Qualification.</b> In a group: wins first, then set or point difference. Lucky Losers (for example the third places) are compared by per-match averages because groups can differ in size.')
     :tr('<b>Awans.</b> Ranking: liczba zwycięstw, potem bilans punktów, potem zdobyte punkty. Czołówka wchodzi do drabinki bezpośrednio.','<b>Qualification.</b> Ranking: number of wins, then point difference, then points scored. The top players go straight into the bracket.');
   return `<details class="how" id="howto" ${S.phase==='signup'?'open':''}><summary>${tr('Jak to działa','How it works')}</summary><ol>
   <li>${tr('<b>Zapisy.</b> Każdy, kto ma ten link, dopisuje siebie albo inne osoby, każdą osobno.','<b>Sign-ups.</b> Anyone with this link adds themselves or other people, one at a time.')}</li>
   <li>${qual}</li>
   <li>${rank}</li>
-  <li>${tr('<b>Lucky Losers</b> (opcjonalnie). Najlepsi spoza bezpośredniego awansu grają między sobą jeden mecz, zwycięzcy uzupełniają drabinkę. Reszta kończy udział.','<b>Lucky Losers</b> (optional). The best players outside direct qualification play each other once; the winners fill up the bracket. The rest are out.')}</li>
-  <li>${tr('<b>Drabinka.</b> Puchar do końca, z meczem o 3. miejsce.','<b>Bracket.</b> Knockout to the end, with a 3rd place match.')}</li>
+  <li>${tr('<b>Lucky Losers</b> (opcjonalnie). Organizator może dodać do fazy pucharowej kilku graczy spoza bezpośredniego awansu: albo po dogrywce (mecz między najlepszymi z tych, którzy odpadli), albo po prostu z tabeli. Reszta kończy udział.','<b>Lucky Losers</b> (optional). The organizer can add a few players from outside direct qualification to the knockout stage: either after a play-off match (between the best of those who dropped out) or simply by the table. The rest are out.')}</li>
+  <li>${tr('<b>Drabinka.</b> Puchar do końca, z meczem o 3. miejsce. Gdy liczba graczy nie jest potęgą dwójki, najsłabsi z tabeli grają rundę wstępną, a najlepsi mają wolny los.','<b>Bracket.</b> Knockout to the end, with a 3rd place match. When the number of players is not a power of two, the lowest seeds play a play-in round and the best have a bye.')}</li>
   <li>${tr('<b>Wyniki</b> po meczu zgłaszacie organizatorowi, on je wpisuje. Strona odświeża się sama.','<b>Results.</b> After a match, tell the organizer and they enter it. The page refreshes by itself.')}</li></ol></details>`;
 }
 
@@ -657,9 +608,9 @@ function qualBox(){
   const maybe=R.slice(0,D).filter(x=>!sureIds.has(x.id));
   const li=xs=>xs.map(x=>`<li>${esc(x.name)}${isMe(x.id)?youLbl():''}</li>`).join('');
   const places=n=>pn(n,['miejsce','miejsca','miejsc'],['place','places']);
-  const intro=tr(`${D} ${plural(D,'osoba wchodzi','osoby wchodzą','osób wchodzi')} bezpośrednio po rundzie 2.${LL?` Kolejne ${2*LL} ${plural(2*LL,'osoba gra','osoby grają','osób gra')} w Lucky Losers o ${LL} ${plural(LL,'miejsce','miejsca','miejsc')}.`:''} Lista aktualizuje się po każdym wyniku.`,
-    `${D} ${D===1?'player goes':'players go'} straight in after round 2.${LL?` The next ${2*LL} ${2*LL===1?'player plays':'players play'} Lucky Losers for ${LL} ${LL===1?'place':'places'}.`:''} The list updates after every result.`);
-  return `<section class="qbox"><div><h2>${tr('Drabinka','Bracket')}: ${K} ${places(K)}</h2>
+  const intro=tr(`${D} ${plural(D,'osoba wchodzi','osoby wchodzą','osób wchodzi')} bezpośrednio po ostatniej rundzie.${LL?(S.llMode==='table'?` Kolejnych ${LL} awansuje z tabeli jako Lucky Losers.`:` Kolejne ${2*LL} ${plural(2*LL,'osoba gra','osoby grają','osób gra')} w Lucky Losers o ${LL} ${plural(LL,'miejsce','miejsca','miejsc')}.`):''} Lista aktualizuje się po każdym wyniku.`,
+    `${D} ${D===1?'player goes':'players go'} straight in after the last round.${LL?(S.llMode==='table'?` The next ${LL} advance by the table as Lucky Losers.`:` The next ${2*LL} ${2*LL===1?'player plays':'players play'} Lucky Losers for ${LL} ${LL===1?'place':'places'}.`):''} The list updates after every result.`);
+  return `<section class="qbox"><div><h2>${tr('Faza pucharowa','Knockout stage')}: ${K} ${tr(plural(K,'gracz','graczy','graczy'),'players')}</h2>
     <p class="sub" style="margin-top:4px">${intro}</p></div>
     <div><div class="qlbl ok">${tr(`✓ Pewny bezpośredni awans: zostańcie, gracie w drabince (${sure.length})`,`✓ Direct qualification secured: stay, you are in the bracket (${sure.length})`)}</div>
     ${sure.length?`<ul class="qlist" style="margin-top:8px">${li(sure)}</ul>`:`<p class="sub" style="margin:6px 0 0">${tr('Jeszcze nikt nie ma pewnego awansu.','Nobody has secured a place yet.')}</p>`}</div>
@@ -678,7 +629,7 @@ function groupsSec(compact){
     return `<div class="gcard"><div class="poolhead"><span class="tag">${tr('Grupa','Group')} ${g.id}</span>${g.done?tr('zakończona','finished'):`${dn}/${ms.length} ${tr('meczów','matches')}`}</div>
       <div class="tablewrap"><table><thead><tr><th class="num">#</th><th>${tr('Zawodnik','Player')}</th><th class="num">${tr('M','P')}</th><th class="num">${tr('Z','W')}</th><th class="num">${T()===1?tr('Punkty','Points'):tr('Sety','Sets')}</th><th class="num">+/−</th></tr></thead><tbody>${rows}</tbody></table></div>
       <div class="mlist" style="margin-top:10px">${ms.map(m=>matchBtn(m,'g')).join('')}</div></div>`; }).join('');
-  const body=`<div class="sechead"><div><h2>${tr('Faza grupowa','Group stage')}</h2><p class="sub">${tr(`W grupie każdy gra z każdym. Z każdej grupy awansuje ${adv} ${plural(adv,'gracz','graczy','graczy')} (przerywana linia). Pozostałe miejsca w drabince zajmują najlepsi z reszty, patrz tabela poniżej.`,`Everyone plays everyone in their group. ${adv} ${adv===1?'player':'players'} from each group advance (dashed line). The remaining bracket places go to the best of the rest, see the table below.`)}</p></div><span class="chip mono">${nd}/${(S.gm||[]).length} ${tr('meczów','matches')}</span></div><div class="gcards">${cards}</div>`;
+  const body=`<div class="sechead"><div><h2>${tr('Faza grupowa','Group stage')}</h2><p class="sub">${tr(`W grupie każdy gra z każdym. Z każdej grupy awansuje ${adv} ${plural(adv,'gracz','graczy','graczy')} (przerywana linia). Ewentualnych Lucky Losers wyłaniamy spośród kolejnych miejsc, patrz tabela poniżej.`,`Everyone plays everyone in their group. ${adv} ${adv===1?'player':'players'} from each group advance (dashed line). Optional Lucky Losers come from the next places, see the table below.`)}</p></div><span class="chip mono">${nd}/${(S.gm||[]).length} ${tr('meczów','matches')}</span></div><div class="gcards">${cards}</div>`;
   return compact?`<div style="margin-block:12px 20px">${body}</div>`:`<section>${body}</section>`;
 }
 
@@ -699,7 +650,7 @@ function statsSec(){
   const all=[];
   const add=(ms,l)=>(ms||[]).forEach(m=>{ if(m.a&&m.b&&valid(m.sa,m.sb)) all.push([l,m]); });
   roundKeys().forEach(k=>add(S[k],stg(k))); (S.groups||[]).forEach(g=>add((S.gm||[]).filter(m=>m.g===g.id),tr('Grupa ','Group ')+g.id)); add(S.ll,stg('ll'));
-  if(S.ko){ S.ko.rounds.forEach(r=>add(r,roundName(r.length,true))); if(S.ko.third) add([S.ko.third],stg('third')); }
+  if(S.ko){ if(S.ko.pre) add(S.ko.pre,tr('Runda wstępna','Play-in')); S.ko.rounds.forEach(r=>add(r,roundName(r.length,true))); if(S.ko.third) add([S.ko.third],stg('third')); }
   const multi=T()>1;
   // point units: the whole match (single set) or every set separately (multi-set matches)
   const seq=[];
@@ -785,7 +736,7 @@ function allResults(){
   const rows=[];
   const add=(ms,label)=>(ms||[]).forEach(m=>{ if(m.a&&m.b&&valid(m.sa,m.sb)) rows.push([label,m]); });
   roundKeys().forEach(k=>add(S[k],stg(k))); (S.groups||[]).forEach(g=>add((S.gm||[]).filter(m=>m.g===g.id),tr('Grupa ','Group ')+g.id)); add(S.ll,stg('ll'));
-  if(S.ko){ S.ko.rounds.forEach(r=>add(r,roundName(r.length,true))); if(S.ko.third) add([S.ko.third],stg('third')); }
+  if(S.ko){ if(S.ko.pre) add(S.ko.pre,tr('Runda wstępna','Play-in')); S.ko.rounds.forEach(r=>add(r,roundName(r.length,true))); if(S.ko.third) add([S.ko.third],stg('third')); }
   const sc=(m,side)=>T()===1&&m.pa!=null?(side==='a'?m.pa:m.pb):(side==='a'?m.sa:m.sb);
   const body=rows.length?rows.map(([l,m])=>{const w=winnerOf(m);return `<tr><td>${l}${m.half?` <span class="n" title="${tr('Mecz uzupełniający','Extra match')}">*</span>`:''}</td>
     <td style="${w===m.a?'font-weight:800':''}">${esc(name(m.a))}</td><td class="num">${sc(m,'a')} : ${sc(m,'b')}${Array.isArray(m.sets)?`<div class="setpts">${m.sets.map(x=>x[0]+':'+x[1]).join(' · ')}</div>`:''}</td><td style="${w===m.b?'font-weight:800':''}">${esc(name(m.b))}</td></tr>`}).join('')
@@ -820,15 +771,17 @@ function tableSec(){
   const rankView=post&&view==='rank', zones=pre||rankView;
   const showStage=post&&!rankView, showStatus=pre||rankView;
   const K=S.K, tie=new Set(S.tie||[]), sel=new Set(S.sel||[]);
-  const D=S.D??K, LL=S.L??0;
+  const D=S.D??K, LL=S.L??0, LLZ=S.llMode==='table'?LL:2*LL;
   const idx={}; R.forEach((r,i)=>idx[r.id]=i);
   const info={}; R.forEach(r=>info[r.id]={lvl:0,lbl:(isRoundPhase(S.phase)||S.phase==='groups')?tr('Kwalifikacje','Qualifying'):(groupsMode()?tr('Faza grupowa','Group stage'):stg('r'+roundN()))});
   const llDone=(S.ll||[]).filter(m=>valid(m.sa,m.sb));
   (S.ll||[]).forEach(m=>{[m.a,m.b].forEach(id=>{if(info[id]){info[id].lvl=5;info[id].lbl='Lucky Losers';}});});
   (S.llDirect||[]).forEach(id=>{if(info[id]){info[id].lvl=6;info[id].lbl=tr('Awans bezpośredni','Direct qualification');}});
+  (S.llTable||[]).forEach(id=>{if(info[id]){info[id].lvl=6;info[id].lbl=tr('Lucky Loser z tabeli','Lucky Loser by the table');}});
   llDone.forEach(m=>{const w=winnerOf(m); if(info[w]){info[w].lvl=6;info[w].lbl=tr('Awans z Lucky Losers','Qualified via Lucky Losers');}});
   if(S.ko){
     const RR=S.ko.rounds, last=RR.length-1;
+    (S.ko.pre||[]).forEach(m=>[m.a,m.b].forEach(id=>{ if(id&&info[id]){ info[id].lvl=9; info[id].lbl=tr('Runda wstępna','Play-in'); } }));
     RR.forEach((r,ri)=>r.forEach(m=>[m.a,m.b].forEach(id=>{ if(id&&info[id]){ info[id].lvl=10+ri; info[id].lbl=roundName(r.length,true); } })));
     const f=RR[last][0], fw=winnerOf(f);
     if(fw){ info[fw].lvl=10+last+1; info[fw].lbl=tr('Zwycięzca','Winner'); const fl=fw===f.a?f.b:f.a; info[fl].lbl=tr('Finał (2. miejsce)','Final (2nd place)'); }
@@ -838,7 +791,7 @@ function tableSec(){
   const koSt={};
   if(S.ko){
     const RR=S.ko.rounds;
-    RR.forEach(r=>r.forEach(m=>{ [m.a,m.b].forEach(id=>{ if(id&&!koSt[id]) koSt[id]='in'; }); const w=winnerOf(m); if(w){ const lo=w===m.a?m.b:m.a; if(lo) koSt[lo]='out'; } }));
+    [(S.ko.pre||[]),...RR].forEach(r=>r.forEach(m=>{ [m.a,m.b].forEach(id=>{ if(id&&!koSt[id]) koSt[id]='in'; }); const w=winnerOf(m); if(w){ const lo=w===m.a?m.b:m.a; if(lo) koSt[lo]='out'; } }));
     const th=S.ko.third; if(th){ [th.a,th.b].forEach(id=>{ if(id) koSt[id]='third'; }); if(winnerOf(th)){ koSt[th.a]='out'; koSt[th.b]='out'; } }
     const fw=winnerOf(RR[RR.length-1][0]); if(fw) koSt[fw]='champ';
   }
@@ -851,20 +804,20 @@ function tableSec(){
       return ['out',tr('Poza drabinką','Out of the bracket')];
     }
     if(groupsMode()&&i<D) return ['in',i<(S.D0||0)?tr('Awans z grupy','Qualified from the group'):tr('Awans (najlepsi z reszty)','Qualified (best of the rest)')];
-    return i<D?['in',tr('Awans bezpośredni','Direct qualification')]:i<D+2*LL?['ll','Lucky Losers']:['out',tr('Poza drabinką','Out of the bracket')];
+    return i<D?['in',tr('Awans bezpośredni','Direct qualification')]:i<D+LLZ?(S.llMode==='table'?['in',tr('Lucky Losers (z tabeli)','Lucky Losers (by the table)')]:['ll','Lucky Losers']):['out',tr('Poza drabinką','Out of the bracket')];
   };
   const rows=post&&!rankView?[...R].sort((a,b)=>info[b.id].lvl-info[a.id].lvl||idx[a.id]-idx[b.id]):R;
   const body=rows.map((r,i)=>{
     const inK=qual?sel.has(r.id):zones&&i<D;
     const st=(showStatus?status(r.id,i):null);
-    const cls=[st&&st[0]==='out'?'out':'', zones&&(i===D-1||(LL&&i===D+2*LL-1))?'cut':'', inK?'in':'', zones&&i>=D&&i<D+2*LL?'llz':'', tie.has(r.id)?'tie':'', isMe(r.id)?'me':''].join(' ');
+    const cls=[st&&st[0]==='out'?'out':'', zones&&(i===D-1||(LL&&i===D+LLZ-1))?'cut':'', inK?'in':'', zones&&i>=D&&i<D+LLZ?'llz':'', tie.has(r.id)?'tie':'', isMe(r.id)?'me':''].join(' ');
     const diff=T()===1?r.pw-r.pl:r.sw-r.sl;
     return `<tr class="${cls}"><td class="num">${i+1}</td><td>${esc(r.name)}${isMe(r.id)?youLbl():''}</td>${groupsMode()?`<td>${r.group||''}</td>`:''}${showStage?`<td>${info[r.id].lbl}</td>`:''}${showStatus?`<td><span class="stt st-${st[0]}">${st[1]}</span></td>`:''}<td class="num">${r.played}</td><td class="num">${r.w}</td><td class="num">${T()===1?`${r.pw}:${r.pl}`:`${r.sw}:${r.sl}`}</td><td class="num">${diff>0?'+':''}${diff}</td>${qual&&S.admin?`<td><input type="checkbox" aria-label="${tr('Awans','Qualifies')}: ${esc(r.name)}" data-sel="${r.id}" ${sel.has(r.id)?'checked':''}></td>`:qual?`<td>${sel.has(r.id)?'✓':''}</td>`:''}</tr>`;}).join('');
   const order=T()===1?tr('zwycięstwa, bilans punktów, zdobyte punkty','wins, point difference, points scored'):tr('zwycięstwa, bilans setów, bilans punktów','wins, set difference, point difference');
   const sub=qual?tr(`Na granicy awansu jest remis (podświetlone wiersze). Organizator wybiera ${K} osób do drabinki.`,`There is a tie at the cut-off (highlighted rows). The organizer picks ${K} players for the bracket.`)
     :post&&!rankView?tr(`Miejsca według etapu, do którego ktoś doszedł, a w obrębie etapu według rankingu z ${groupsMode()?'fazy grupowej':roundN()>1?'rund 1–'+roundN():'rundy 1'} (${order}). Mecze, zwycięstwa i punkty liczone z ${groupsMode()?'fazy grupowej':roundN()>1?'rund 1–'+roundN():'rundy 1'}.`,`Places by the stage each player reached; within a stage, by the ${groupsMode()?'group stage':roundN()>1?'rounds 1–'+roundN():'round 1'} ranking (${order}). Matches, wins and points are counted from the ${groupsMode()?'group stage':roundN()>1?'rounds 1–'+roundN():'round 1'}.`)
-    :tr(`${LL?`Miejsca 1–${D}: bezpośrednio do drabinki. Miejsca ${D+1}–${D+2*LL}: Lucky Losers, zwycięzcy ${LL} meczów dołączają do drabinki.${R.length>D+2*LL?' Pozostali kończą udział.':''}`:`Do drabinki wchodzi ${K} najlepszych.`} Kolejność: ${order}.`,
-        `${LL?`Places 1–${D}: straight into the bracket. Places ${D+1}–${D+2*LL}: Lucky Losers, the winners of ${LL} ${LL===1?'match':'matches'} join the bracket.${R.length>D+2*LL?' Everyone else is out.':''}`:`The top ${K} go into the bracket.`} Order: ${order}.`)+(zones?tr(` Poniżej ostatniej linii odpadają przy obecnym układzie; kolumna Status pokazuje, kto jeszcze gra.`,` Anyone below the last line is out at the current standings; the Status column shows who is still in.`):'');
+    :tr(`${LL?`Miejsca 1–${D}: bezpośrednio do fazy pucharowej. ${S.llMode==='table'?`Miejsca ${D+1}–${D+LL}: Lucky Losers, awansują z tabeli.`:`Miejsca ${D+1}–${D+2*LL}: Lucky Losers, zwycięzcy ${LL} meczów dołączają do fazy pucharowej.`}${R.length>D+LLZ?' Pozostali kończą udział.':''}`:`Do fazy pucharowej wchodzi ${K} najlepszych.`} Kolejność: ${order}.`,
+        `${LL?`Places 1–${D}: straight into the knockout stage. ${S.llMode==='table'?`Places ${D+1}–${D+LL}: Lucky Losers, they advance by the table.`:`Places ${D+1}–${D+2*LL}: Lucky Losers, the winners of ${LL} ${LL===1?'match':'matches'} join the knockout stage.`}${R.length>D+LLZ?' Everyone else is out.':''}`:`The top ${K} go into the knockout stage.`} Order: ${order}.`)+(zones?tr(` Poniżej ostatniej linii odpadają przy obecnym układzie; kolumna Status pokazuje, kto jeszcze gra.`,` Anyone below the last line is out at the current standings; the Status column shows who is still in.`):'');
   const seg=post?`<div class="seg" role="group" aria-label="${tr('Widok tabeli','Table view')}"><button type="button" data-tview="final" aria-pressed="${!rankView}">${tr('Miejsca końcowe','Final standings')}</button><button type="button" data-tview="rank" aria-pressed="${rankView}">${tr('Progi awansu','Qualification cut-offs')}</button></div>`:'';
   const head=`<div class="sechead"><div><h2>${qual?tr('Tabela: awans do drabinki','Standings: bracket qualification'):tr('Tabela','Standings')}</h2><p class="sub">${sub}</p></div>${seg}</div>`;
   return `<section>${head}<div class="tablewrap"><table><thead><tr><th class="num">#</th><th>${tr('Zawodnik','Player')}</th>${groupsMode()?`<th>${tr('Grupa','Group')}</th>`:''}${showStage?`<th>${tr('Etap','Stage')}</th>`:''}${showStatus?`<th>${tr('Status','Status')}</th>`:''}<th class="num">${tr('M','P')}</th><th class="num">${tr('Z','W')}</th><th class="num">${T()===1?tr('Punkty','Points'):tr('Sety','Sets')}</th><th class="num">+/−</th>${qual?`<th>${tr('Awans','Qualifies')}</th>`:''}</tr></thead><tbody>${body}</tbody></table></div>
@@ -875,10 +828,11 @@ function tableSec(){
 
 function roundName(n,sing){ if(LANG==='pl') return n===1?'Finał':n===2?(sing?'Półfinał':'Półfinały'):n===4?(sing?'Ćwierćfinał':'Ćwierćfinały'):`1/${n} finału`; return n===1?'Final':n===2?(sing?'Semi-final':'Semi-finals'):n===4?(sing?'Quarter-final':'Quarter-finals'):`Round of ${2*n}`; }
 function bracket(){
-  const R=S.ko.rounds;
-  const cols=R.map((r,ri)=>`<div class="col ${ri===R.length-1?'final':''}"><h3>${roundName(r.length)}</h3><div class="slots">${r.map(m=>matchBtn(m,'ko',{tbd:tr('zwycięzca poprzedniego meczu','winner of the previous match')})).join('')}</div></div>`).join('');
+  const R=S.ko.rounds, pre=S.ko.pre||[];
+  const preCol=pre.length?`<div class="col"><h3>${tr('Runda wstępna','Play-in round')}</h3><div class="slots">${pre.map(m=>matchBtn(m,'pre')).join('')}</div></div>`:'';
+  const cols=preCol+R.map((r,ri)=>`<div class="col ${ri===R.length-1?'final':''}"><h3>${roundName(r.length)}</h3><div class="slots">${r.map(m=>matchBtn(m,'ko',{tbd:ri===0&&pre.length?tr('zwycięzca rundy wstępnej','play-in winner'):tr('zwycięzca poprzedniego meczu','winner of the previous match')})).join('')}</div></div>`).join('');
   const third=S.ko.third?`<div class="third"><h3 class="lbl">${tr('Mecz o 3. miejsce','3rd place match')}</h3>${matchBtn(S.ko.third,'third',{tbd:tr('przegrany półfinału','semi-final loser')})}</div>`:'';
-  return `<section><div class="sechead"><div><h2>${tr('Drabinka pucharowa','Knockout bracket')}</h2><p class="sub">${tr('Przegrany odpada. Na telefonie przesuń drabinkę w bok.','The loser is out. On a phone, swipe the bracket sideways.')}</p></div></div><div class="bracket"><div class="cols">${cols}</div></div>${third}</section>`;
+  return `<section><div class="sechead"><div><h2>${tr('Drabinka pucharowa','Knockout bracket')}</h2><p class="sub">${tr('Przegrany odpada. Na telefonie przesuń drabinkę w bok.','The loser is out. On a phone, swipe the bracket sideways.')}${pre.length?' '+tr('Najlepsi z tabeli mają wolny los, najsłabsi grają rundę wstępną, żeby dalej została pełna drabinka.','The best of the table have a bye, the lowest seeds play a play-in round so that a full bracket remains.'):''}</p></div></div><div class="bracket"><div class="cols">${cols}</div></div>${third}</section>`;
 }
 
 function laurel(color){
@@ -916,21 +870,19 @@ function adminPanel(){
   const p=S.phase; const dl=S.deadline?toLocalInput(S.deadline):'';
   const mode=S.scoreMode||'points';
   const N=S.players.length, locked=p!=='signup', fmt=S.format||'rounds', R=roundN(), gsz=S.groupSize||4, gadv=S.groupAdvance||2;
-  const bracketLocked=['ko','done'].includes(p);
-  const bracketCur=`${S.K}:${S.L}`;
-  const gLocked=fmt==='groups'&&locked, rPlans=bracketLocked?[]:bracketPlans(N), gPlans=(bracketLocked||gLocked)?[]:groupPlans(N);
-  const realD0=(S.groups||[]).reduce((n,g)=>n+Math.min(gadv,g.ids.length),0);
-  const gkPlans=(gLocked&&!bracketLocked)?groupKPlans(N,realD0,S.K):[];
-  const head=tr(`Propozycje dla ${N} ${plural(N,'gracza','graczy','graczy')}`,`Suggestions for ${N} ${N===1?'player':'players'}`);
-  const plansHtml=(rPlans.length||gPlans.length||gkPlans.length)?`<div class="plans" id="plans-rounds" ${fmt==='groups'?'hidden':''}><div class="qlbl">${head} · ${tr('losowe rundy','random-opponent rounds')}</div>${listPlans(rPlans.map(pl=>`<button type="button" class="plan ${fmt==='rounds'&&pl.K===S.K&&pl.L===S.L?'on':''}" data-plan="${pl.K}:${pl.L}"><b>${pl.rec?'★ ':''}${pl.K} ${tr(plural(pl.K,'miejsce w drabince','miejsca w drabince','miejsc w drabince'),'bracket places')}${pl.rec?' · '+tr('zalecane','recommended'):''}</b><span>${planText(pl,N)}</span></button>`))}</div>
-  <div class="plans" id="plans-groups" ${fmt==='groups'?'':'hidden'}><div class="qlbl">${head} · ${tr('grupy','groups')}</div>${listPlans(gkPlans.map(pl=>`<button type="button" class="plan ${pl.K===S.K&&pl.L===S.L?'on':''}" data-plan="${pl.K}:${pl.L}"><b>${pl.K} ${tr(plural(pl.K,'miejsce w drabince','miejsca w drabince','miejsc w drabince'),'bracket places')}</b><span>${groupKPlanText(pl,N)}</span></button>`).concat(gPlans.map((gp,i)=>`<button type="button" class="plan ${fmt==='groups'&&gp.size===gsz&&gp.adv===gadv&&gp.K===S.K?'on':''}" data-gplan="${gp.size}:${gp.adv}:${gp.K}"><b>${i===0?'★ ':''}${tr(`Grupy po ok. ${gp.size}`,`Groups of about ${gp.size}`)}${i===0?' · '+tr('zalecane','recommended'):''}</b><span>${groupPlanText(gp,N)}</span></button>`)))}</div>`:'';
+  const koLocked=['ko','done'].includes(p);
+  const rec=S.recPct||recPctFor(N), pct0=S.advancePct==null?rec:S.advancePct;
+  const pctList=ADV_PCTS.includes(pct0)?ADV_PCTS:[...ADV_PCTS,pct0].sort((a,b)=>b-a);
+  const pctOpts=pctList.map(pc=>{ const d=directFor(N,pc); return `<option value="${pc}" ${pc===pct0?'selected':''}>${pc}% → ${d} ${tr(plural(d,'osoba','osoby','osób'),d===1?'player':'players')}${isPow2(d)?' · '+tr('pełna drabinka','full bracket'):''}${pc===rec?' · '+tr('zalecane','recommended'):''}</option>`; }).join('');
+  const llOn=S.luckyLosers===true, llMode=S.llMode==='table'?'table':'playoff';
+  const base=koPlanFor({N,groups:fmt==='groups',size:gsz,adv:gadv,pct:pct0,ll:false});
+  const plan=koPlanFor({N,groups:fmt==='groups',size:gsz,adv:gadv,pct:pct0,ll:llOn,mode:llMode,spots:S.llSpots});
   const late=['groups',...roundKeys()].includes(p);
   const lateInfo=p==='groups'?tr('Dołączy do najmniejszej grupy i zagra z każdym jej członkiem.','They join the smallest group and play everyone in it.')
     :p==='r1'?tr('Dostanie mecz w rundzie 1 (z osobą bez pary albo z losowym rywalem, liczony tylko dla niego). W kolejnych rundach zagra normalnie.','They get a round 1 match (against someone without a partner or a random opponent, counted only for them). They play the following rounds normally.')
     :tr(`Dostanie ${p[1]} ${plural(+p[1],'mecz','mecze','meczów')} w rundzie ${p[1]} z losowymi rywalami, liczone tylko dla niego.`,`They get ${p[1]} matches in round ${p[1]} against random opponents, counted only for them.`);
   return `<section class="admin">
   <p class="sub" style="margin:0">${S.demo?tr('W wersji demo jesteś organizatorem. Wszystko dzieje się w Twojej przeglądarce.','In the demo you are the organizer. Everything happens in your browser.'):tr('Widzisz go tylko na urządzeniu, na którym otwarto link organizatora. Nie udostępniaj go dalej.','You only see this on the device where the organizer link was opened. Do not share it.')}</p>
-  ${plansHtml}
   <form id="setf" class="grid2">
     <label class="f">${tr('Nazwa turnieju','Tournament name')}<input id="s_title" value="${esc(S.title)}" maxlength="120"></label>
     <label class="f">${tr('Mecz do wygranych setów','Sets to win a match')}<select id="s_sets" ${locked?'disabled':''}>${[1,2,3].map(v=>`<option value="${v}" ${v===T()?'selected':''}>${v}</option>`).join('')}</select></label>
@@ -940,7 +892,16 @@ function adminPanel(){
     <label class="f fmt-groups" ${fmt==='groups'?'':'hidden'}>${tr('Wielkość grup','Group size')}<select id="s_gsize" ${locked?'disabled':''}>${[3,4,5,6].map(v=>`<option value="${v}" ${v===gsz?'selected':''}>${tr('ok. '+v+' graczy','about '+v+' players')}</option>`).join('')}</select></label>
     <label class="f fmt-groups" ${fmt==='groups'?'':'hidden'}>${tr('Awansuje z grupy','Advance from each group')}<select id="s_gadv" ${locked?'disabled':''}>${[1,2].map(v=>`<option value="${v}" ${v===gadv?'selected':''}>${v} ${tr(plural(v,'gracz','graczy','graczy'),v===1?'player':'players')}</option>`).join('')}</select></label>
     <p class="sub" id="fmtinfo" style="grid-column:1/-1;margin:0">${fmtInfoText(fmt,N,R,gsz,gadv)}</p>
-    <label class="f" style="grid-column:1/-1">${tr('Drabinka i Lucky Losers','Bracket and Lucky Losers')}<select id="s_bracket" data-init="${bracketCur}" ${bracketLocked?'disabled':''}>${bracketSelectHtml(N,{groups:fmt==='groups',size:gsz,adv:gadv},bracketCur)}</select></label>
+    <div class="kobox" id="kobox" style="grid-column:1/-1">
+      <div class="qlbl">${tr('Faza pucharowa','Knockout stage')}</div>
+      <div class="grid2" style="margin-top:8px">
+        <label class="f fmt-rounds" ${fmt==='rounds'?'':'hidden'}>${tr('Ilu graczy awansuje bezpośrednio','How many players advance directly')}<select id="s_pct" ${koLocked?'disabled':''}>${pctOpts}</select></label>
+        <label class="f">${tr('Lucky Losers','Lucky Losers')}<select id="s_ll_on" ${koLocked?'disabled':''}><option value="0">${tr('Nie','No')}</option><option value="1" ${llOn?'selected':''}>${tr('Tak','Yes')}</option></select></label>
+        <label class="f ll-opts" ${llOn?'':'hidden'}>${tr('Jak rozstrzygamy Lucky Losers','How Lucky Losers are decided')}<select id="s_ll_mode" ${koLocked?'disabled':''}><option value="playoff" ${llMode==='playoff'?'selected':''}>${tr('Dogrywka: jeszcze mecz między sobą','Play-off: one more match between them')}</option><option value="table" ${llMode==='table'?'selected':''}>${tr('Awans z tabeli: bez dodatkowych meczów','By the table: no extra matches')}</option></select></label>
+        <label class="f ll-opts" ${llOn?'':'hidden'}>${tr('Ilu Lucky Losers dołącza','How many Lucky Losers join')}<select id="s_ll_n" ${koLocked?'disabled':''}>${llNOptions(base.D,base.pool,llMode,plan.L)}</select></label>
+      </div>
+      <p class="sub" id="kosum" style="margin:8px 0 0">${koSummary(N,plan)}</p>
+    </div>
     <label class="f">${tr('Automatyczne losowanie o','Automatic draw at')}<input id="s_dl" type="datetime-local" value="${dl}" ${locked?'disabled':''}></label>
     <div style="display:flex;align-items:end"><button class="btn" type="submit">${tr('Zapisz ustawienia','Save settings')}</button></div>
   </form>
@@ -972,7 +933,7 @@ function bind(){
     if(a==='sim') return TTEngine.simulateStage();
     if(a==='fresh') return TTEngine.freshWithPlayers(DEMO_NAMES);
     if(a==='random'){ const st=randomTournament(), i=randomTournament.info;
-      toast(tr(`Losowy turniej: ${i.n} osób, ${i.format==='groups'?'grupy':`${i.rounds} ${plural(i.rounds,'runda','rundy','rund')}`}, ${i.sets===1?'1 set':`mecz do ${i.sets} wygranych setów`}, drabinka na ${i.K} miejsc.`,`Random tournament: ${i.n} players, ${i.format==='groups'?'groups':`${i.rounds} ${i.rounds===1?'round':'rounds'}`}, ${i.sets===1?'single set':`first to ${i.sets} sets`}, bracket of ${i.K}.`)); return st; }
+      toast(tr(`Losowy turniej: ${i.n} osób, ${i.format==='groups'?'grupy':`${i.rounds} ${plural(i.rounds,'runda','rundy','rund')}`}, ${i.sets===1?'1 set':`mecz do ${i.sets} wygranych setów`}, faza pucharowa: ${i.K} graczy.`,`Random tournament: ${i.n} players, ${i.format==='groups'?'groups':`${i.rounds} ${i.rounds===1?'round':'rounds'}`}, ${i.sets===1?'single set':`first to ${i.sets} sets`}, knockout of ${i.K}.`)); return st; }
     const r=await fetch('demo-data.json'); return TTEngine.loadState(await r.json());
   },{sim:tr('Wyniki wylosowane.','Results drawn at random.'),fresh:tr('Nowy turniej: 26 osób na liście, zamknij zapisy w panelu organizatora.','New tournament: 26 people on the list, close sign-ups in the organizer panel.'),random:'',sample:tr('Wczytano przykładowy turniej.','Sample tournament loaded.')}[b.dataset.demo]));
   const jf=$('#joinf'); if(jf) jf.addEventListener('submit',e=>{e.preventDefault(); const n=$('#jname').value;
@@ -985,34 +946,42 @@ function bind(){
     run(()=>api('api/admin',{action:'select',sel:[...sel]}));});
   document.querySelectorAll('[data-confirm]').forEach(b=>b.onclick=()=>confirmBox(b.dataset.confirm));
   document.querySelectorAll('[data-rename]').forEach(b=>b.onclick=()=>renameBox(b.dataset.rename));
-  document.querySelectorAll('[data-plan]').forEach(b=>b.onclick=()=>{ const [K,L]=b.dataset.plan.split(':').map(Number); run(()=>api('api/admin',{action:'settings',...(S.phase==='signup'?{format:'rounds'}:{}),koSize:K,llSpots:L}),tr(`Zastosowano: drabinka na ${K} miejsc, Lucky Losers: ${L}.`,`Applied: bracket of ${K}, Lucky Losers: ${L}.`)); });
-  document.querySelectorAll('[data-gplan]').forEach(b=>b.onclick=()=>{ const [size,adv,K]=b.dataset.gplan.split(':').map(Number); run(()=>api('api/admin',{action:'settings',format:'groups',groupSize:size,groupAdvance:adv,koSize:K,llSpots:0}),tr(`Zastosowano: grupy po ok. ${size}, awansuje ${adv}, drabinka na ${K}.`,`Applied: groups of about ${size}, ${adv} advance, bracket of ${K}.`)); });
   const sfmt=$('#s_fmt');
   if(sfmt){
-    const N=S.players.length, val=id=>+$('#'+id).value, sb=$('#s_bracket');
-    const fill=()=>{
-      const groups=sfmt.value==='groups', size=val('s_gsize'), adv=val('s_gadv'), K=groups?autoKGroups(N,size,adv):defaultK(N);
-      sb.innerHTML=bracketSelectHtml(N,{groups,size,adv},`${K}:${groups?0:autoL(K,N)}`);
-      sb.dataset.touched='1';
+    const N=S.players.length, num=id=>+$('#'+id).value, kobox=$('#kobox');
+    const readKo=(withSpots)=>({N,groups:sfmt.value==='groups',size:num('s_gsize'),adv:num('s_gadv'),pct:num('s_pct'),ll:$('#s_ll_on').value==='1',mode:$('#s_ll_mode').value,spots:withSpots?num('s_ll_n'):null});
+    // rebuilds the Lucky Losers count list and the summary from the current choices
+    const refreshKo=(resetN)=>{
+      const o=readKo(false), base=koPlanFor({...o,ll:false}), sel=$('#s_ll_n'), prev=resetN?null:+sel.value;
+      sel.innerHTML=llNOptions(base.D,base.pool,o.mode,prev);
+      const none=!sel.options.length; if(none&&o.ll){ $('#s_ll_on').value='0'; }
+      const ll=$('#s_ll_on').value==='1';
+      document.querySelectorAll('.ll-opts').forEach(e=>e.hidden=!ll);
+      $('#kosum').textContent=koSummary(N,koPlanFor({...o,ll,spots:ll&&!none?num('s_ll_n'):null}))+(none&&o.ll?' '+tr('Nie ma z kogo wyłonić Lucky Losers.','There is nobody to pick Lucky Losers from.'):'');
     };
-    const refreshInfo=()=>{ $('#fmtinfo').textContent=fmtInfoText(sfmt.value,N,val('s_rounds'),val('s_gsize'),val('s_gadv')); };
+    const refreshInfo=()=>{ $('#fmtinfo').textContent=fmtInfoText(sfmt.value,N,num('s_rounds'),num('s_gsize'),num('s_gadv')); };
     const onFormat=()=>{
       const f=sfmt.value;
       document.querySelectorAll('.fmt-rounds').forEach(e=>e.hidden=f!=='rounds');
       document.querySelectorAll('.fmt-groups').forEach(e=>e.hidden=f!=='groups');
-      const pr=$('#plans-rounds'), pg=$('#plans-groups'); if(pr) pr.hidden=f!=='rounds'; if(pg) pg.hidden=f!=='groups';
-      fill(); refreshInfo();
+      kobox.dataset.touched='1'; refreshInfo(); refreshKo(true);
     };
     ['s_fmt','s_gsize','s_gadv'].forEach(id=>$('#'+id).addEventListener('change',onFormat));
     $('#s_rounds').addEventListener('change',refreshInfo);
-    sb.addEventListener('change',()=>{ sb.dataset.touched='1'; });
+    ['s_pct','s_ll_on','s_ll_mode'].forEach(id=>$('#'+id).addEventListener('change',()=>{ kobox.dataset.touched='1'; refreshKo(true); }));
+    $('#s_ll_n').addEventListener('change',()=>{ kobox.dataset.touched='1'; refreshKo(false); });
   }
   const sf=$('#setf'); if(sf) sf.addEventListener('submit',e=>{e.preventDefault();
     const dlv=$('#s_dl').value; const body={action:'settings',title:$('#s_title').value,scoreMode:$('#s_mode').value};
     // format first, then sizes; bracket and Lucky Losers places are only sent once the organizer has picked them
     if(!$('#s_fmt').disabled){ body.format=$('#s_fmt').value; body.rounds=+$('#s_rounds').value; body.groupSize=+$('#s_gsize').value; body.groupAdvance=+$('#s_gadv').value; }
-    const sbk=$('#s_bracket');
-    if(sbk&&!sbk.disabled&&(sbk.dataset.touched||sbk.value!==sbk.dataset.init)){ const [K,L]=sbk.value.split(':').map(Number); body.koSize=K; body.llSpots=L; }
+    // knockout stage: only sent when the organizer touched it, and it replaces any old explicit bracket size
+    const kb=$('#kobox');
+    if(kb&&kb.dataset.touched&&!$('#s_ll_on').disabled){
+      const ll=$('#s_ll_on').value==='1';
+      body.koSize=null; body.luckyLosers=ll; body.llMode=$('#s_ll_mode').value; body.llSpots=ll&&$('#s_ll_n').value?+$('#s_ll_n').value:null;
+      if($('#s_fmt').value==='rounds') body.advancePct=+$('#s_pct').value;
+    }
     if(!$('#s_sets').disabled) body.setsToWin=+$('#s_sets').value;
     if(!$('#s_dl').disabled) body.deadline=dlv?new Date(dlv).toISOString():null;
     run(()=>api('api/admin',body),tr('Zapisano ustawienia.','Settings saved.'));});
@@ -1020,7 +989,7 @@ function bind(){
   const af=$('#addf'); if(af) af.addEventListener('submit',e=>{e.preventDefault(); run(()=>api('api/admin',{action:'add',name:$('#a_name').value}),tr('Dodano zawodnika.','Player added.'));});
 }
 
-function findMatch(stage,id){ if(isRoundPhase(stage)||stage==='ll') return (S[stage]||[]).find(m=>m.id===id); if(stage==='g') return (S.gm||[]).find(m=>m.id===id); if(stage==='ko') return S.ko.rounds.flat().find(m=>m.id===id); return S.ko.third; }
+function findMatch(stage,id){ if(stage==='pre') return (S.ko.pre||[]).find(m=>m.id===id); if(isRoundPhase(stage)||stage==='ll') return (S[stage]||[]).find(m=>m.id===id); if(stage==='g') return (S.gm||[]).find(m=>m.id===id); if(stage==='ko') return S.ko.rounds.flat().find(m=>m.id===id); return S.ko.third; }
 function showDlg(html,onBind){ const f=$('#dlgform'); f.innerHTML=html; const d=$('#dlg'); dlgOpen=true; d.showModal(); onBind&&onBind(f); d.onclose=()=>{dlgOpen=false; refresh(true);}; }
 
 function timingRow(m){

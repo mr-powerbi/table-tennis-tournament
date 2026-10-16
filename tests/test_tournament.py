@@ -2,6 +2,7 @@
 
 Run: python3 -m unittest discover tests
 """
+import math
 import os
 import random
 import sys
@@ -14,7 +15,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "server"))
 import server as S  # noqa: E402
 
 
-def play(s, rng, late_in=None):
+def play(s, rng, late_in=None, until=None):
     """Enters random results until the tournament reaches the podium.
 
     late_in: stage (r1/r2) in which a late player is added after the first result.
@@ -22,6 +23,8 @@ def play(s, rng, late_in=None):
     steps = 0
     late_done = False
     while s["phase"] != "done":
+        if until and until(s):
+            return
         steps += 1
         assert steps < 1000, "the tournament got stuck in a loop"
         ph = s["phase"]
@@ -29,7 +32,7 @@ def play(s, rng, late_in=None):
             S.admin_action(s, {"action": "late", "name": "Late Player"})
             late_done = True
         if ph == "ko":
-            ms = [(m, "ko") for r in s["ko"]["rounds"] for m in r]
+            ms = [(m, "pre") for m in (s["ko"].get("pre") or [])] + [(m, "ko") for r in s["ko"]["rounds"] for m in r]
             if s["ko"]["third"]:
                 ms.append((s["ko"]["third"], "third"))
         elif ph == "groups":
@@ -64,16 +67,16 @@ class TournamentTest(unittest.TestCase):
                 self.assertGreaterEqual(min(played), 2, "everyone plays at least two matches")
 
     def test_bracket_is_direct_qualifiers_plus_lucky_losers(self):
-        s = new_tournament(26)
+        s = new_tournament(26, koSize=16, llSpots=4)  # explicit power-of-two bracket (API only)
         play(s, random.Random(1))
         K, D, L = S.ll_plan(s)
         self.assertEqual((K, D, L), (16, 12, 4))
-        first_round = {p for m in s["ko"]["rounds"][0] for p in (m["a"], m["b"])}
+        first_round = self.entrants(s)
         ll_winners = {S.winner(m, 1) for m in s["ll"]}
         self.assertEqual(first_round, set(s["llDirect"]) | ll_winners)
 
     def test_bracket_seeding_first_vs_last(self):
-        s = new_tournament(16, llSpots=2)
+        s = new_tournament(16, koSize=8, llSpots=2)
         play(s, random.Random(3))
         rank = [r["id"] for r in S.ranking(s)]
         ll_w = sorted((S.winner(m, 1) for m in s["ll"]), key=rank.index)
@@ -170,7 +173,7 @@ class TournamentTest(unittest.TestCase):
                     steps += 1
                     assert steps < 1000
                     ph = s["phase"]
-                    ms = ([(m, "ko") for r in s["ko"]["rounds"] for m in r] + ([(s["ko"]["third"], "third")] if s["ko"]["third"] else [])) if ph == "ko" else [(m, ph) for m in s[ph]]
+                    ms = ([(m, "pre") for m in (s["ko"].get("pre") or [])] + [(m, "ko") for r in s["ko"]["rounds"] for m in r] + ([(s["ko"]["third"], "third")] if s["ko"]["third"] else [])) if ph == "ko" else [(m, ph) for m in s[ph]]
                     m, st = [(m, st) for m, st in ms if m["a"] and m["b"] and m["sa"] is None][0]
                     sets = [[11, rng.randint(0, 9)] if rng.random() < .5 else [rng.randint(0, 9), 11] for _ in range(2)]
                     if sets[0][0] > sets[0][1] and sets[1][0] < sets[1][1] or sets[0][0] < sets[0][1] and sets[1][0] > sets[1][1]:
@@ -204,7 +207,7 @@ class TournamentTest(unittest.TestCase):
         S.admin_action(s, {"action": "settings", "llSpots": "auto"})
         self.assertEqual(S.ll_plan(s), (8, 6, 2))
         with self.assertRaises(S.Err):
-            S.admin_action(s, {"action": "settings", "llSpots": 17})
+            S.admin_action(s, {"action": "settings", "llSpots": 65})
         with self.assertRaises(S.Err):
             S.admin_action(s, {"action": "settings", "koSize": 12})
 
@@ -245,12 +248,14 @@ class TournamentTest(unittest.TestCase):
                 for g in s["groups"]:
                     self.assertEqual(len([m for m in s["gm"] if m["g"] == g["id"]]), len(g["ids"]) * (len(g["ids"]) - 1) // 2)
                 K0 = S.ko_size(s)
+                play(s, rng, until=lambda x: x["phase"] == "ko")  # the bracket has just been built
+                grp = {i: g["id"] for g in s["groups"] for i in g["ids"]}
+                known = [m for m in (s["ko"].get("pre") or []) + s["ko"]["rounds"][0] if m["a"] and m["b"]]
+                self.assertLessEqual(sum(1 for m in known if grp[m["a"]] == grp[m["b"]]), 1,
+                                     "same-group pairs known at the start are avoided")
                 play(s, rng)
                 self.assertEqual(s["phase"], "done")
-                self.assertEqual(len({i for m in s["ko"]["rounds"][0] for i in (m["a"], m["b"])}), K0, "full bracket")
-                grp = {i: g["id"] for g in s["groups"] for i in g["ids"]}
-                clashes = [m for m in s["ko"]["rounds"][0] if grp[m["a"]] == grp[m["b"]]]
-                self.assertLessEqual(len(clashes), 1, "same-group pairs in the first round are avoided")
+                self.assertEqual(len(self.entrants(s)), K0, "full bracket")
                 for r in S.ranking(s):
                     self.assertEqual(r["played"], len(next(g for g in s["groups"] if g["id"] == r["group"])["ids"]) - 1)
 
@@ -265,6 +270,92 @@ class TournamentTest(unittest.TestCase):
             S.admin_action(s, {"action": "settings", "format": "rounds"})
         with self.assertRaises(S.Err):
             S.admin_action(s, {"action": "settings", "rounds": 3})
+
+
+    # ---- knockout stage: share of players advancing, Lucky Losers yes/no and how they are decided ----
+
+    @staticmethod
+    def entrants(s):
+        ko = s["ko"]
+        ids = {i for m in (ko.get("pre") or []) for i in (m["a"], m["b"])}
+        ids |= {i for m in ko["rounds"][0] for i in (m["a"], m["b"])}
+        ids.discard(None)
+        return ids
+
+    def test_share_of_players_advancing_is_even_and_rounded_up(self):
+        rng = random.Random(14)
+        for n in (3, 5, 8, 11, 16, 20, 21, 33, 40):
+            for pct in (70, 60, 50, 45, 40, 35, 30, 25, 20):
+                with self.subTest(players=n, pct=pct):
+                    s = new_tournament(n, advancePct=pct, koSize=None)
+                    raw = math.ceil(n * pct / 100 - 1e-9)
+                    want = max(2, min(raw + raw % 2, n - n % 2))
+                    pl = S.knockout_plan(s)
+                    self.assertEqual((pl["D"], pl["L"], pl["M"]), (want, 0, want))
+                    self.assertEqual(want % 2, 0)
+                    play(s, rng)
+                    self.assertEqual(s["phase"], "done")
+                    ko = s["ko"]
+                    matches = len(ko.get("pre") or []) + sum(len(r) for r in ko["rounds"])
+                    self.assertEqual(matches, want - 1, "single elimination plays M-1 matches")
+                    self.assertEqual(len(self.entrants(s)), want)
+                    if ko.get("pre"):
+                        order = [r["id"] for r in S.ranking(s)]
+                        pre_players = {i for m in ko["pre"] for i in (m["a"], m["b"])}
+                        byes = self.entrants(s) - pre_players
+                        self.assertLess(max(order.index(i) for i in byes), min(order.index(i) for i in pre_players),
+                                        "the best of the table get the byes")
+
+    def test_recommendation_is_closest_to_half(self):
+        self.assertEqual(S.recommended_pct(20), 50)
+        self.assertEqual(S.knockout_plan(new_tournament(20))["D"], 10)
+        self.assertEqual(S.recommended_l(16, "table"), 8)
+        self.assertEqual(S.recommended_l(16, "playoff"), 4)
+
+    def test_lucky_losers_yes_no_and_mode(self):
+        rng = random.Random(8)
+        for n in (12, 20, 26, 33):
+            for mode in ("playoff", "table"):
+                with self.subTest(players=n, mode=mode):
+                    s = new_tournament(n, advancePct=40, koSize=None, luckyLosers=True, llMode=mode)
+                    pl = S.knockout_plan(s)
+                    self.assertGreaterEqual(pl["L"], 1)
+                    self.assertEqual((pl["D"] + pl["L"]) % 2, 0)
+                    self.assertEqual(pl["pool"], n - pl["D"])
+                    L, D = pl["L"], pl["D"]
+                    play(s, rng)
+                    self.assertEqual(s["phase"], "done")
+                    self.assertEqual(len(self.entrants(s)), D + L)
+                    self.assertEqual(len(s["ll"]), 0 if mode == "table" else L)
+                    # chosen number, and off means none
+                    s2 = new_tournament(n, advancePct=40, koSize=None, luckyLosers=True, llMode=mode, llSpots=2)
+                    self.assertEqual(S.knockout_plan(s2)["L"], 2)
+                    s2["luckyLosers"] = False
+                    self.assertEqual(S.knockout_plan(s2)["L"], 0)
+        s = new_tournament(10)
+        for bad in ({"advancePct": 3}, {"llMode": "nonsense"}, {"llSpots": 65}):
+            with self.assertRaises(S.Err):
+                S.admin_action(s, dict(bad, action="settings"))
+
+    def test_groups_lucky_losers_come_from_the_third_places(self):
+        for n, size, adv in ((20, 4, 2), (24, 4, 2), (26, 4, 2)):
+            with self.subTest(players=n):
+                s = new_tournament(n, format="groups", groupSize=size, groupAdvance=adv, koSize=None, luckyLosers=True, llMode="table")
+                G = len(s["groups"])
+                pl = S.knockout_plan(s)
+                self.assertEqual(pl["D"], G * adv)
+                self.assertEqual(pl["pool"], G)
+                self.assertTrue(1 <= pl["L"] <= G and (pl["D"] + pl["L"]) % 2 == 0)
+                play(s, random.Random(n))
+                self.assertEqual(s["phase"], "done")
+
+    def test_groups_with_an_odd_number_of_qualifiers_get_the_best_of_the_rest(self):
+        s = new_tournament(15, format="groups", groupSize=5, groupAdvance=1, koSize=None)
+        pl = S.knockout_plan(s)
+        self.assertEqual(pl["D"], 3)
+        self.assertEqual((pl["M"], pl["L"], pl["mode"]), (4, 1, "table"))
+        play(s, random.Random(1))
+        self.assertEqual(s["phase"], "done")
 
 
 if __name__ == "__main__":

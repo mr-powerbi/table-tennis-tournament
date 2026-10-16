@@ -36,7 +36,7 @@
   function newState() {
     return {
       title: DEFAULT_TITLE, edition: 'Edycja 2026', prize: '', setsToWin: 1, scoreMode: 'points', format: 'rounds', groupSize: 4, groupAdvance: 2, groups: [], gm: [],
-      koSize: null, llSpots: null, deadline: null, phase: 'signup', players: [],
+      koSize: null, llSpots: null, advancePct: null, luckyLosers: false, llMode: 'playoff', llTable: [], deadline: null, phase: 'signup', players: [],
       r1: [], r2: [], r3: [], r4: [], r5: [], r6: [], rounds: 2, ll: [], llDirect: [], sel: null, ko: null, rev: 0, updated: now(),
     };
   }
@@ -166,21 +166,38 @@
     const byRank = (a, b) => a.grank - b.grank || cmp(a, b);
     return [...rows.filter((r) => r.grank <= adv).sort(byRank), ...rows.filter((r) => r.grank > adv).sort(byRank)];
   }
-  // first-round bracket pairs (seed i vs seed K-1-i) should not be two players from the same group
+  // The first matches of the bracket should not pair two players from the same group. Only players of the same
+  // kind swap places (play-in with play-in, bye with bye), so nobody gets or loses a bye through this. A simple
+  // local search: swap two players while that reduces the number of same-group pairs.
   function avoidGroupClashes(s, ordered) {
     if (s.format !== 'groups') return ordered;
     const grp = {};
     (s.groups || []).forEach((g) => g.ids.forEach((id) => (grp[id] = g.id)));
-    const K = ordered.length, out = [...ordered], half = K / 2;
-    for (let i = 0; i < half; i++) {
-      const ib = K - 1 - i;
-      if (!grp[out[i]] || grp[out[i]] !== grp[out[ib]]) continue;
-      for (let j = 0; j < half; j++) {
-        if (j === i) continue;
-        const jb = K - 1 - j;
-        if (grp[out[i]] !== grp[out[jb]] && grp[out[j]] !== grp[out[ib]]) { [out[ib], out[jb]] = [out[jb], out[ib]]; break; }
+    const M = ordered.length, out = [...ordered];
+    let P = 1;
+    while (P * 2 <= M) P *= 2;
+    P = Math.max(P, 2);
+    const R = M - P;
+    const playIn = Array.from({ length: R }, (_, j) => [P - R + j, M - 1 - j]);
+    const byes = Array.from({ length: P / 2 }, (_, i) => [i, P - 1 - i]).filter(([a, b]) => a < P - R && b < P - R);
+    const clashes = (pairs) => pairs.filter(([a, b]) => grp[out[a]] && grp[out[a]] === grp[out[b]]).length;
+    const optimise = (pairs, positions) => {
+      let best = clashes(pairs), improved = true;
+      while (best > 0 && improved) {
+        improved = false;
+        for (let i = 0; i < positions.length && best > 0; i++) {
+          for (let j = i + 1; j < positions.length && best > 0; j++) {
+            const x = positions[i], y = positions[j];
+            if (grp[out[x]] === grp[out[y]]) continue;
+            [out[x], out[y]] = [out[y], out[x]];
+            const c = clashes(pairs);
+            if (c < best) { best = c; improved = true; } else [out[x], out[y]] = [out[y], out[x]];
+          }
+        }
       }
-    }
+    };
+    optimise(playIn, playIn.flat());          // any two play-in players may swap
+    optimise(byes, byes.map(([, hi]) => hi)); // only the weaker side of a bye pair moves
     return out;
   }
 
@@ -208,15 +225,52 @@
     while (k * 2 <= Math.max(2, Math.floor(n * 0.75))) k *= 2;
     return Math.min(k, pow2Floor(n));
   }
-  function koSize(s) {
-    const N = s.players.length;
-    let k = s.koSize;
-    if (!k) {
-      if (s.format === 'groups') { k = 2; const d = groupDirect(s); while (k < d) k *= 2; }
-      else k = defaultK(N);
-    }
-    return Math.min(k, pow2Floor(N));
+  // ---------- knockout stage: who goes through ----------
+  // The organizer picks how many players advance directly (a percentage of the field, always an even number),
+  // optionally adds Lucky Losers (decided by a play-off match or simply by the table) on top of them.
+  const ADV_PCTS = [70, 65, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10];
+  const ceilEven = (x) => { const c = Math.ceil(x - 1e-9); return c % 2 ? c + 1 : c; };
+  const directFor = (N, pct) => Math.max(2, Math.min(ceilEven((N * pct) / 100), N - (N % 2)));
+  // the percentage whose direct qualifiers come closest to half of the players
+  function recommendedPct(N) {
+    let best = 50, bestDist = Infinity;
+    for (const p of ADV_PCTS) { const d = Math.abs(directFor(N, p) - N / 2); if (d < bestDist - 1e-9) { bestDist = d; best = p; } }
+    return best;
   }
+  // recommended number of Lucky Losers: about half of the pool for "by the table", half of the play-off candidates otherwise
+  function recommendedL(pool, mode) {
+    const cap = mode === 'playoff' ? Math.floor(pool / 2) : pool;
+    const L = Math.round((pool * (mode === 'playoff' ? 0.25 : 0.5)) / 2) * 2;
+    return Math.max(0, Math.min(Math.max(L, 2), cap));
+  }
+  // groups: the Lucky Losers come from the players placed right behind the qualifiers (the third places)
+  const llPoolGroups = (s) => {
+    const adv = s.groupAdvance || 2;
+    const sizes = (s.groups && s.groups.length) ? s.groups.map((g) => g.ids.length) : groupSizes(s.players.length, s.groupSize || 4);
+    return sizes.filter((z) => z > adv).length;
+  };
+  // { M: players in the knockout stage, D: direct qualifiers, L: Lucky Losers, mode: 'playoff' | 'table', pool }
+  function knockoutPlan(s) {
+    const N = s.players.length, groups = s.format === 'groups';
+    if (s.koSize && s.advancePct == null) { // explicit power-of-two bracket (API only)
+      const K = Math.min(s.koSize, pow2Floor(N));
+      let L;
+      if (groups) { L = s.llSpots == null ? 0 : s.llSpots; L = Math.max(0, Math.min(L, K - Math.min(groupDirect(s), K), N - K)); }
+      else { L = s.llSpots == null ? Math.max(1, Math.floor(K / 4)) : s.llSpots; L = Math.max(0, Math.min(L, K, N - K)); }
+      return { M: K, D: K - L, L, mode: 'playoff', pool: N - (K - L), legacy: true };
+    }
+    const D = groups ? Math.min(groupDirect(s), N) : directFor(N, s.advancePct == null ? recommendedPct(N) : s.advancePct);
+    const pool = groups ? llPoolGroups(s) : N - D;
+    let mode = s.llMode === 'table' ? 'table' : 'playoff', L = 0;
+    if (s.luckyLosers === true && pool >= (mode === 'playoff' ? 2 : 1)) {
+      const cap = mode === 'playoff' ? Math.floor(pool / 2) : pool;
+      L = Math.max(0, Math.min(s.llSpots != null ? s.llSpots : recommendedL(pool, mode), cap));
+      if ((D + L) % 2) L = L > 1 ? L - 1 : (L + 1 <= cap ? L + 1 : 0); // keep the number of players even
+    }
+    if ((D + L) % 2) { L += 1; mode = 'table'; } // odd number of group qualifiers: the best of the rest joins
+    return { M: D + L, D, L, mode, pool, legacy: false };
+  }
+  const koSize = (s) => knockoutPlan(s).M;
 
   function boundaryTie(rank, K) {
     if (rank.length <= K) return [];
@@ -224,19 +278,29 @@
     return rank.filter((r) => sameKey(r, rank[K - 1])).map((r) => r.id);
   }
 
+  // Any number of players M: P is the largest power of two <= M. The 2R = 2(M-P) lowest seeds play a play-in
+  // round, the best P-R seeds have a bye. Their winners fill the empty places of a normal bracket of P.
   function buildKo(s, ordered) {
     ordered = avoidGroupClashes(s, ordered);
-    const K = ordered.length;
-    const r0 = [];
-    for (let i = 0; i < K / 2; i++) r0.push({ id: mid(), a: ordered[i], b: ordered[K - 1 - i], sa: null, sb: null });
-    const rounds = [r0];
-    let n = K / 2;
-    while (n > 1) {
-      n /= 2;
-      rounds.push(Array.from({ length: n }, () => ({ id: mid(), a: null, b: null, sa: null, sb: null })));
+    const M = ordered.length;
+    let P = 1;
+    while (P * 2 <= M) P *= 2;
+    if (P < 2) P = 2;
+    const R = M - P, fresh = () => ({ id: mid(), a: null, b: null, sa: null, sb: null });
+    const pre = Array.from({ length: R }, (_, j) => Object.assign(fresh(), { a: ordered[P - R + j], b: ordered[M - 1 - j] }));
+    const preMap = [], r0 = [];
+    for (let i = 0; i < P / 2; i++) {
+      const m = fresh();
+      [['a', i], ['b', P - 1 - i]].forEach(([side, slot]) => {
+        if (slot < P - R) m[side] = ordered[slot];
+        else preMap.push({ i, side, j: slot - (P - R) });
+      });
+      r0.push(m);
     }
-    const third = K >= 4 ? { id: mid(), a: null, b: null, sa: null, sb: null } : null;
-    s.ko = { rounds, third };
+    const rounds = [r0];
+    let n = P / 2;
+    while (n > 1) { n /= 2; rounds.push(Array.from({ length: n }, fresh)); }
+    s.ko = { pre: R ? pre : null, preMap, rounds, third: P >= 4 ? fresh() : null };
     s.phase = 'ko';
     propagate(s);
   }
@@ -248,8 +312,16 @@
     }
   }
 
+  function setSide(m, side, id) {
+    if (m[side] !== id) {
+      m[side] = id;
+      Object.assign(m, { sa: null, sb: null, pa: null, pb: null, sets: null });
+      delete m.t0; delete m.t1;
+    }
+  }
   function propagate(s) {
     const T = s.setsToWin, ko = s.ko, R = ko.rounds;
+    (ko.preMap || []).forEach(({ i, side, j }) => setSide(R[0][i], side, winner(ko.pre[j], T)));
     for (let r = 1; r < R.length; r++)
       R[r].forEach((m, i) => setp(m, winner(R[r - 1][2 * i], T), winner(R[r - 1][2 * i + 1], T)));
     if (ko.third && R.length >= 2) {
@@ -289,28 +361,24 @@
   }
 
   function llPlan(s) {
-    const N = s.players.length, K = koSize(s);
-    let L;
-    if (s.format === 'groups') {
-      // the best of the rest go straight in by default; Lucky Losers only fill spots beyond the group qualifiers
-      L = s.llSpots == null ? 0 : s.llSpots;
-      L = Math.max(0, Math.min(L, K - Math.min(groupDirect(s), K), N - K));
-    } else {
-      L = s.llSpots == null ? Math.max(1, Math.floor(K / 4)) : s.llSpots; // 0 = no Lucky Losers
-      L = Math.max(0, Math.min(L, K, N - K));
-    }
-    return [K, K - L, L];
+    const p = knockoutPlan(s);
+    return [p.M, p.D, p.L];
   }
 
   function startLl(s) {
     const rank = ranking(s).map((r) => r.id);
-    const [K, D, L] = llPlan(s);
+    const plan = knockoutPlan(s), D = plan.D, L = plan.L;
     s.llDirect = rank.slice(0, D);
-    const pool = rank.slice(D, D + 2 * L);
     s.ll = [];
-    for (let i = 0; i < L; i++) s.ll.push({ id: mid(), a: pool[i], b: pool[2 * L - 1 - i], sa: null, sb: null, half: false, pool: 'll' });
+    s.llTable = [];
     s.phase = 'll';
-    if (!s.ll.length) buildKo(s, rank.slice(0, K));
+    if (plan.mode === 'table' || !L) { // Lucky Losers by the table: no extra matches
+      s.llTable = rank.slice(D, D + L);
+      buildKo(s, rank.slice(0, D + L));
+      return;
+    }
+    const pool = rank.slice(D, D + 2 * L);
+    for (let i = 0; i < L; i++) s.ll.push({ id: mid(), a: pool[i], b: pool[2 * L - 1 - i], sa: null, sb: null, half: false, pool: 'll' });
   }
 
   function advance(s) {
@@ -359,12 +427,13 @@
     else if (stage === 'g') pool = s.gm || [];
     else if (stage === 'ko' && s.ko) pool = s.ko.rounds.flat();
     else if (stage === 'third' && s.ko && s.ko.third) pool = [s.ko.third];
+    else if (stage === 'pre' && s.ko && s.ko.pre) pool = s.ko.pre;
     const m = pool.find((x) => x.id === id);
     if (!m) throw new Err('Nie znaleziono meczu.');
     return m;
   }
 
-  const STAGE_PHASE = { r1: ['r1'], r2: ['r2'], r3: ['r3'], r4: ['r4'], r5: ['r5'], r6: ['r6'], g: ['groups'], ll: ['ll'], ko: ['ko', 'done'], third: ['ko', 'done'] };
+  const STAGE_PHASE = { r1: ['r1'], r2: ['r2'], r3: ['r3'], r4: ['r4'], r5: ['r5'], r6: ['r6'], g: ['groups'], ll: ['ll'], ko: ['ko', 'done'], pre: ['ko', 'done'], third: ['ko', 'done'] };
   const pointsOk = (pa, pb) => [pa, pb].every((v) => isInt(v) && v >= 0 && v <= 99) && Math.max(pa, pb) >= 11 && Math.abs(pa - pb) >= 2;
 
   // Match to several sets: the points of every set are entered, the match score (e.g. 2:1) is derived from them.
@@ -414,7 +483,7 @@
     Object.assign(m, clearing ? { sa: null, sb: null, pa: null, pb: null, sets: null } : { sa, sb, pa, pb, sets: setList });
     // Match time: the organizer records the start, entering the result is the end.
     if (clearing) { delete m.t0; delete m.t1; } else if (m.t0 && !m.t1) m.t1 = now();
-    if (stage === 'ko' || stage === 'third') propagate(s); else advance(s);
+    if (stage === 'ko' || stage === 'third' || stage === 'pre') propagate(s); else advance(s);
   }
 
   function startMatch(s, stage, id, cancel) {
@@ -457,21 +526,33 @@
         if (s.phase !== 'signup' && v !== s.setsToWin) throw new Err('Format meczu można zmienić tylko przed losowaniem.');
         s.setsToWin = v;
       }
+      // knockout stage: how many advance, Lucky Losers yes/no, how they are decided, how many
+      let koChanged = false;
+      const koKey = (key, v) => {
+        if ((s[key] ?? null) === v) return;
+        if (['ko', 'done'].includes(s.phase)) throw new Err('Drabinka już ruszyła. Cofnij turniej, aby zmienić jej ustawienia.');
+        if (s.phase === 'll' && (s.ll || []).some((m) => m.sa !== null)) throw new Err('W Lucky Losers są już wyniki. Cofnij turniej, aby zmienić ustawienia drabinki.');
+        s[key] = v; koChanged = true;
+      };
       if ('koSize' in body) {
         const v = emptyKey(body.koSize) ? null : parseInt(body.koSize, 10);
         if (v !== null && ![2, 4, 8, 16, 32, 64].includes(v)) throw new Err('Drabinka może mieć 2, 4, 8, 16, 32 lub 64 miejsca.');
-        if (['ko', 'done'].includes(s.phase) && v !== (s.koSize || null)) throw new Err('Drabinka już ruszyła. Cofnij turniej, aby zmienić jej rozmiar.');
-        s.koSize = v;
+        koKey('koSize', v);
+      }
+      if ('advancePct' in body) {
+        const v = [null, undefined, '', 'auto'].includes(body.advancePct) ? null : parseInt(body.advancePct, 10);
+        if (v !== null && !(v >= 5 && v <= 95)) throw new Err('Odsetek awansujących musi mieścić się między 5% a 95%.');
+        koKey('advancePct', v);
+      }
+      if ('luckyLosers' in body) koKey('luckyLosers', body.luckyLosers === true || body.luckyLosers === 'true');
+      if ('llMode' in body) {
+        if (!['playoff', 'table'].includes(body.llMode)) throw new Err('Lucky Losers mogą się dogrywać albo awansować z tabeli.');
+        koKey('llMode', body.llMode);
       }
       if ('llSpots' in body) {
         const v = [null, undefined, '', 'auto'].includes(body.llSpots) ? null : parseInt(body.llSpots, 10);
-        if (v !== null && !(v >= 0 && v <= 16)) throw new Err('Miejsc dla Lucky Losers może być od 0 do 16.');
-        if (v !== (s.llSpots ?? null)) {
-          if (['ko', 'done'].includes(s.phase)) throw new Err('Drabinka już ruszyła. Cofnij do Lucky Losers lub rundy 2, aby to zmienić.');
-          if (s.phase === 'll' && (s.ll || []).some((m) => m.sa !== null)) throw new Err('W Lucky Losers są już wyniki. Cofnij do rundy 2, aby zmienić liczbę miejsc.');
-          s.llSpots = v;
-          if (s.phase === 'll') startLl(s);
-        }
+        if (v !== null && !(v >= 0 && v <= 64)) throw new Err('Miejsc dla Lucky Losers może być od 0 do 64.');
+        koKey('llSpots', v);
       }
       if ('rounds' in body) {
         const v = parseInt(body.rounds, 10);
@@ -500,6 +581,7 @@
         if (!['points', 'sets'].includes(body.scoreMode)) throw new Err('Nieznany tryb wpisywania wyników.');
         s.scoreMode = body.scoreMode;
       }
+      if (koChanged && s.phase === 'll') startLl(s);
       if ('deadline' in body) {
         if (body.deadline && isNaN(Date.parse(body.deadline))) throw new Err('Błędna data.');
         s.deadline = body.deadline || null;
@@ -557,7 +639,7 @@
       else throw new Err('Nie można cofnąć do tego etapu.');
     } else if (act === 'reset') {
       const ns = newState();
-      for (const k of ['title', 'edition', 'prize', 'setsToWin', 'scoreMode', 'rounds', 'format', 'groupSize', 'groupAdvance', 'koSize', 'llSpots']) ns[k] = s[k] ?? ns[k];
+      for (const k of ['title', 'edition', 'prize', 'setsToWin', 'scoreMode', 'rounds', 'format', 'groupSize', 'groupAdvance', 'koSize', 'llSpots', 'advancePct', 'luckyLosers', 'llMode']) ns[k] = s[k] ?? ns[k];
       if (body.keepPlayers) ns.players = s.players;
       ns.rev = s.rev || 0;
       Object.keys(s).forEach((k) => delete s[k]);
@@ -576,7 +658,10 @@
     out.K = K;
     out.ll = out.ll || [];
     out.llDirect = out.llDirect || [];
-    if (s.players.length >= 2) [, out.D, out.L] = llPlan(s);
+    if (s.players.length >= 2) {
+      const kp = knockoutPlan(s);
+      out.D = kp.D; out.L = kp.L; out.llMode = kp.mode; out.llPool = kp.pool; out.recPct = recommendedPct(s.players.length);
+    }
     out.tie = s.phase === 'qual' ? boundaryTie(rank, K) : [];
     out.groupTables = s.format === 'groups' ? groupTables(s) : [];
     out.D0 = s.format === 'groups' && s.players.length >= 2 ? Math.min(groupDirect(s), out.K) : 0;
@@ -657,13 +742,14 @@
     const pointsMode = (s.scoreMode || 'points') === 'points';
     const stage = { r1: 'r1', r2: 'r2', r3: 'r3', r4: 'r4', r5: 'r5', r6: 'r6', groups: 'g', ll: 'll', ko: 'ko' }[s.phase];
     if (!stage) throw new Error('Na tym etapie nie ma meczów do rozegrania.');
-    const pool = stage === 'ko' ? [...s.ko.rounds.flat().map((m) => ['ko', m]), ...(s.ko.third ? [['third', s.ko.third]] : [])] : stage === 'g' ? (s.gm || []).map((m) => ['g', m]) : s[stage].map((m) => [stage, m]);
+    const pool = stage === 'ko' ? [...(s.ko.pre || []).map((m) => ['pre', m]), ...s.ko.rounds.flat().map((m) => ['ko', m]), ...(s.ko.third ? [['third', s.ko.third]] : [])] : stage === 'g' ? (s.gm || []).map((m) => ['g', m]) : s[stage].map((m) => [stage, m]);
     const todo = pool.filter(([, m]) => m.a && m.b && m.sa === null);
     if (!todo.length) throw new Error('Wszystkie gotowe mecze tego etapu mają już wyniki.');
     // In the bracket we play one round at a time so the winners can be seen advancing.
-    const firstRound = stage === 'ko' ? s.ko.rounds.findIndex((r) => r.some((m) => m.a && m.b && m.sa === null)) : -1;
+    const koLevels = stage === 'ko' ? [s.ko.pre || [], ...s.ko.rounds] : [];
+    const firstRound = stage === 'ko' ? koLevels.findIndex((r) => r.some((m) => m.a && m.b && m.sa === null)) : -1;
     for (const [st, m] of todo) {
-      if (stage === 'ko' && st === 'ko' && !s.ko.rounds[firstRound].includes(m)) continue;
+      if (stage === 'ko' && (st === 'ko' || st === 'pre') && !koLevels[firstRound].includes(m)) continue;
       if (T === 1) {
         // ~15% of matches reach deuce (10:10); every further exchange extends the game with ~45% chance,
         // so 12:10 is common while 15:13 or 18:16 are rare but do happen.

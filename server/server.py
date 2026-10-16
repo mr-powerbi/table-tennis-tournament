@@ -9,7 +9,7 @@ On start the server prints the organizer link with the token in the #admin-... p
 Error messages raised with Err(...) are user-facing text kept in Polish, the original language of the
 interface. The browser translates them for the English UI (see ERR_EN in docs/index.html).
 """
-import hashlib, hmac, json, os, random, secrets, threading, datetime
+import hashlib, hmac, json, math, os, random, secrets, threading, datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +31,7 @@ def now():
 def new_state():
     return {"title": DEFAULT_TITLE, "edition": "Edycja 2026", "prize": "", "setsToWin": 1, "scoreMode": "points",
             "rounds": 2, "format": "rounds", "groupSize": 4, "groupAdvance": 2, "groups": [], "gm": [],
-            "koSize": None, "llSpots": None, "deadline": None, "phase": "signup", "players": [],
+            "koSize": None, "llSpots": None, "advancePct": None, "luckyLosers": False, "llMode": "playoff", "llTable": [], "deadline": None, "phase": "signup", "players": [],
             "r1": [], "r2": [], "r3": [], "r4": [], "r5": [], "r6": [], "ll": [], "llDirect": [], "sel": None, "ko": None, "rev": 0, "updated": now()}
 
 
@@ -250,24 +250,46 @@ def group_ranking(s):
 
 
 def avoid_group_clashes(s, ordered):
-    """First-round bracket pairs (seed i vs seed K-1-i) should not be two players from the same group."""
+    """The first matches of the bracket should not pair two players from the same group. Only players of the same
+    kind swap places (play-in with play-in, bye with bye), so nobody gets or loses a bye through this. A simple
+    local search: swap two players while that reduces the number of same-group pairs."""
     if s.get("format") != "groups":
         return ordered
     grp = {i: g["id"] for g in s.get("groups") or [] for i in g["ids"]}
-    K = len(ordered)
+    M = len(ordered)
     out = list(ordered)
-    half = K // 2
-    for i in range(half):
-        ib = K - 1 - i
-        if not grp.get(out[i]) or grp.get(out[i]) != grp.get(out[ib]):
-            continue
-        for j in range(half):
-            if j == i:
-                continue
-            jb = K - 1 - j
-            if grp.get(out[i]) != grp.get(out[jb]) and grp.get(out[j]) != grp.get(out[ib]):
-                out[ib], out[jb] = out[jb], out[ib]
-                break
+    P = 1
+    while P * 2 <= M:
+        P *= 2
+    P = max(P, 2)
+    R = M - P
+    play_in = [(P - R + j, M - 1 - j) for j in range(R)]
+    byes = [(i, P - 1 - i) for i in range(P // 2) if i < P - R and P - 1 - i < P - R]
+
+    def clashes(pairs):
+        return sum(1 for a, b in pairs if grp.get(out[a]) and grp.get(out[a]) == grp.get(out[b]))
+
+    def optimise(pairs, positions):
+        best = clashes(pairs)
+        improved = True
+        while best > 0 and improved:
+            improved = False
+            for i in range(len(positions)):
+                for j in range(i + 1, len(positions)):
+                    if best == 0:
+                        return
+                    x, y = positions[i], positions[j]
+                    if grp.get(out[x]) == grp.get(out[y]):
+                        continue
+                    out[x], out[y] = out[y], out[x]
+                    c = clashes(pairs)
+                    if c < best:
+                        best, improved = c, True
+                    else:
+                        out[x], out[y] = out[y], out[x]
+
+    optimise(play_in, [pos for pair in play_in for pos in pair])  # any two play-in players may swap
+    optimise(byes, [hi for _, hi in byes])  # only the weaker side of a bye pair moves
     return out
 
 
@@ -294,18 +316,82 @@ def default_k(n):
     return min(k, pow2_floor(n))
 
 
-def ko_size(s):
+# ---------- knockout stage: who goes through ----------
+# The organizer picks how many players advance directly (a percentage of the field, always an even number),
+# optionally adds Lucky Losers (decided by a play-off match or simply by the table) on top of them.
+ADV_PCTS = (70, 65, 60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10)
+
+
+def ceil_even(x):
+    c = math.ceil(x - 1e-9)
+    return c + 1 if c % 2 else c
+
+
+def direct_for(n, pct):
+    return max(2, min(ceil_even(n * pct / 100), n - n % 2))
+
+
+def recommended_pct(n):
+    """The percentage whose direct qualifiers come closest to half of the players."""
+    best, best_dist = 50, float("inf")
+    for p_ in ADV_PCTS:
+        d = abs(direct_for(n, p_) - n / 2)
+        if d < best_dist - 1e-9:
+            best, best_dist = p_, d
+    return best
+
+
+def recommended_l(pool, mode):
+    """About half of the pool for "by the table", half of the play-off candidates otherwise."""
+    cap = pool // 2 if mode == "playoff" else pool
+    share = 0.25 if mode == "playoff" else 0.5
+    n = pool * share / 2
+    l = int(math.floor(n + 0.5)) * 2  # round half up, like Math.round
+    return max(0, min(max(l, 2), cap))
+
+
+def ll_pool_groups(s):
+    """Groups: the Lucky Losers come from the players placed right behind the qualifiers (the third places)."""
+    adv = s.get("groupAdvance") or 2
+    groups = s.get("groups") or []
+    sizes = [len(g["ids"]) for g in groups] if groups else group_sizes(len(s["players"]), s.get("groupSize") or 4)
+    return sum(1 for z in sizes if z > adv)
+
+
+def knockout_plan(s):
+    """M players in the knockout stage, D direct qualifiers, L Lucky Losers, mode 'playoff' | 'table', pool."""
     n = len(s["players"])
-    k = s.get("koSize")
-    if not k:
-        if s.get("format") == "groups":
-            k = 2
-            d = group_direct(s)
-            while k < d:
-                k *= 2
+    groups = s.get("format") == "groups"
+    if s.get("koSize") and s.get("advancePct") is None:  # explicit power-of-two bracket (API only)
+        k = min(s["koSize"], pow2_floor(n))
+        l = s.get("llSpots")
+        if groups:
+            l = 0 if l is None else l
+            l = max(0, min(l, k - min(group_direct(s), k), n - k))
         else:
-            k = default_k(n)
-    return min(k, pow2_floor(n))
+            if l is None:
+                l = max(1, k // 4)
+            l = max(0, min(l, k, n - k))
+        return {"M": k, "D": k - l, "L": l, "mode": "playoff", "pool": n - (k - l), "legacy": True}
+    pct = s.get("advancePct")
+    d = min(group_direct(s), n) if groups else direct_for(n, recommended_pct(n) if pct is None else pct)
+    pool = ll_pool_groups(s) if groups else n - d
+    mode = "table" if s.get("llMode") == "table" else "playoff"
+    l = 0
+    if s.get("luckyLosers") is True and pool >= (2 if mode == "playoff" else 1):
+        cap = pool // 2 if mode == "playoff" else pool
+        want = s.get("llSpots")
+        l = max(0, min(recommended_l(pool, mode) if want is None else want, cap))
+        if (d + l) % 2:  # keep the number of players even
+            l = l - 1 if l > 1 else (l + 1 if l + 1 <= cap else 0)
+    if (d + l) % 2:  # odd number of group qualifiers: the best of the rest joins
+        l += 1
+        mode = "table"
+    return {"M": d + l, "D": d, "L": l, "mode": mode, "pool": pool, "legacy": False}
+
+
+def ko_size(s):
+    return knockout_plan(s)["M"]
 
 
 def boundary_tie(s, rank, K):
@@ -326,18 +412,39 @@ def seed_order(n):
 
 
 def build_ko(s, ordered):
+    """Any number of players M: P is the largest power of two <= M. The 2R = 2(M-P) lowest seeds play a play-in
+    round, the best P-R seeds have a bye. Their winners fill the empty places of a normal bracket of P."""
     ordered = avoid_group_clashes(s, ordered)
-    K = len(ordered)
-    r0 = []
-    for i in range(K // 2):
-        r0.append({"id": mid(), "a": ordered[i], "b": ordered[K - 1 - i], "sa": None, "sb": None})
+    M = len(ordered)
+    P = 1
+    while P * 2 <= M:
+        P *= 2
+    P = max(P, 2)
+    R = M - P
+
+    def fresh():
+        return {"id": mid(), "a": None, "b": None, "sa": None, "sb": None}
+
+    pre = []
+    for j in range(R):
+        m = fresh()
+        m["a"], m["b"] = ordered[P - R + j], ordered[M - 1 - j]
+        pre.append(m)
+    pre_map, r0 = [], []
+    for i in range(P // 2):
+        m = fresh()
+        for side, slot in (("a", i), ("b", P - 1 - i)):
+            if slot < P - R:
+                m[side] = ordered[slot]
+            else:
+                pre_map.append({"i": i, "side": side, "j": slot - (P - R)})
+        r0.append(m)
     rounds = [r0]
-    n = K // 2
+    n = P // 2
     while n > 1:
         n //= 2
-        rounds.append([{"id": mid(), "a": None, "b": None, "sa": None, "sb": None} for _ in range(n)])
-    third = {"id": mid(), "a": None, "b": None, "sa": None, "sb": None} if K >= 4 else None
-    s["ko"] = {"rounds": rounds, "third": third}
+        rounds.append([fresh() for _ in range(n)])
+    s["ko"] = {"pre": pre if R else None, "preMap": pre_map, "rounds": rounds, "third": fresh() if P >= 4 else None}
     s["phase"] = "ko"
     propagate(s)
 
@@ -350,10 +457,20 @@ def setp(m, a, b):
         m.pop("t1", None)
 
 
+def set_side(m, side, pid):
+    if m[side] != pid:
+        m[side] = pid
+        m["sa"], m["sb"], m["pa"], m["pb"], m["sets"] = None, None, None, None, None
+        m.pop("t0", None)
+        m.pop("t1", None)
+
+
 def propagate(s):
     T = s["setsToWin"]
     ko = s["ko"]
     R = ko["rounds"]
+    for pm in ko.get("preMap") or []:
+        set_side(R[0][pm["i"]], pm["side"], winner(ko["pre"][pm["j"]], T))
     for r in range(1, len(R)):
         for i, m in enumerate(R[r]):
             setp(m, winner(R[r - 1][2 * i], T), winner(R[r - 1][2 * i + 1], T))
@@ -418,29 +535,24 @@ def advance(s):
 
 
 def ll_plan(s):
-    N = len(s["players"])
-    K = ko_size(s)
-    L = s.get("llSpots")  # None = automatic, 0 = no Lucky Losers
-    if s.get("format") == "groups":
-        # the best of the rest go straight in by default; Lucky Losers only fill spots beyond the group qualifiers
-        L = 0 if L is None else L
-        L = max(0, min(L, K - min(group_direct(s), K), N - K))
-    else:
-        if L is None:
-            L = max(1, K // 4)
-        L = max(0, min(L, K, N - K))
-    return K, K - L, L
+    pl = knockout_plan(s)
+    return pl["M"], pl["D"], pl["L"]
 
 
 def start_ll(s):
     rank = [r["id"] for r in ranking(s)]
-    K, D, L = ll_plan(s)
+    plan = knockout_plan(s)
+    D, L = plan["D"], plan["L"]
     s["llDirect"] = rank[:D]
+    s["ll"] = []
+    s["llTable"] = []
+    s["phase"] = "ll"
+    if plan["mode"] == "table" or not L:  # Lucky Losers by the table: no extra matches
+        s["llTable"] = rank[D:D + L]
+        build_ko(s, rank[:D + L])
+        return
     pool = rank[D:D + 2 * L]
     s["ll"] = [{"id": mid(), "a": pool[i], "b": pool[2 * L - 1 - i], "sa": None, "sb": None, "half": False, "pool": "ll"} for i in range(L)]
-    s["phase"] = "ll"
-    if not s["ll"]:
-        build_ko(s, rank[:K])
 
 
 def draw(s):
@@ -482,6 +594,8 @@ def find_match(s, stage, m_id):
         pool = [m for r in s["ko"]["rounds"] for m in r]
     elif stage == "third" and s["ko"] and s["ko"]["third"]:
         pool = [s["ko"]["third"]]
+    elif stage == "pre" and s["ko"] and s["ko"].get("pre"):
+        pool = s["ko"]["pre"]
     else:
         pool = []
     for m in pool:
@@ -490,7 +604,7 @@ def find_match(s, stage, m_id):
     raise Err("Nie znaleziono meczu.")
 
 
-STAGE_PHASE = {"r1": ("r1",), "r2": ("r2",), "r3": ("r3",), "r4": ("r4",), "r5": ("r5",), "r6": ("r6",), "g": ("groups",), "ll": ("ll",), "ko": ("ko", "done"), "third": ("ko", "done")}
+STAGE_PHASE = {"r1": ("r1",), "r2": ("r2",), "r3": ("r3",), "r4": ("r4",), "r5": ("r5",), "r6": ("r6",), "g": ("groups",), "ll": ("ll",), "ko": ("ko", "done"), "pre": ("ko", "done"), "third": ("ko", "done")}
 
 
 def points_ok(pa, pb):
@@ -570,7 +684,7 @@ def set_score(s, stage, m_id, sa, sb, admin, pa=None, pb=None, sets=None):
         m.pop("t1", None)
     elif m.get("t0") and not m.get("t1"):
         m["t1"] = now()
-    if stage in ("ko", "third"):
+    if stage in ("ko", "third", "pre"):
         propagate(s)
     else:
         advance(s)
@@ -608,31 +722,48 @@ def admin_action(s, body):
             if s["phase"] != "signup" and v != s["setsToWin"]:
                 raise Err("Format meczu można zmienić tylko przed losowaniem.")
             s["setsToWin"] = v
+        # knockout stage: how many advance, Lucky Losers yes/no, how they are decided, how many
+        ko_changed = []
+
+        def ko_key(key, v):
+            if s.get(key) == v:
+                return
+            if s["phase"] in ("ko", "done"):
+                raise Err("Drabinka już ruszyła. Cofnij turniej, aby zmienić jej ustawienia.")
+            if s["phase"] == "ll" and any(m["sa"] is not None for m in s.get("ll", [])):
+                raise Err("W Lucky Losers są już wyniki. Cofnij turniej, aby zmienić ustawienia drabinki.")
+            s[key] = v
+            ko_changed.append(key)
+
         if "koSize" in body:
             v = body["koSize"]
             if v in (None, "", 0, "auto"):
-                if s["phase"] in ("ko", "done") and s.get("koSize"):
-                    raise Err("Drabinka już ruszyła. Cofnij turniej, aby zmienić jej rozmiar.")
-                s["koSize"] = None
+                ko_key("koSize", None)
             else:
                 v = int(v)
                 if v not in (2, 4, 8, 16, 32, 64):
                     raise Err("Drabinka może mieć 2, 4, 8, 16, 32 lub 64 miejsca.")
-                if s["phase"] in ("ko", "done") and v != s.get("koSize"):
-                    raise Err("Drabinka już ruszyła. Cofnij turniej, aby zmienić jej rozmiar.")
-                s["koSize"] = v
+                ko_key("koSize", v)
+        if "advancePct" in body:
+            v = body["advancePct"]
+            v = None if v in (None, "", "auto") else int(v)
+            if v is not None and not (5 <= v <= 95):
+                raise Err("Odsetek awansujących musi mieścić się między 5% a 95%.")
+            ko_key("advancePct", v)
+        if "luckyLosers" in body:
+            ko_key("luckyLosers", body["luckyLosers"] is True or body["luckyLosers"] == "true")
+        if "llMode" in body:
+            if body["llMode"] not in ("playoff", "table"):
+                raise Err("Lucky Losers mogą się dogrywać albo awansować z tabeli.")
+            ko_key("llMode", body["llMode"])
         if "llSpots" in body:
             v = body["llSpots"]
             v = None if v in (None, "", "auto") else int(v)
-            if v is not None and not (0 <= v <= 16):
-                raise Err("Miejsc dla Lucky Losers może być od 0 do 16.")
-            if s["phase"] in ("ko", "done"):
-                raise Err("Drabinka już ruszyła. Cofnij do Lucky Losers lub rundy 2, aby to zmienić.")
-            if s["phase"] == "ll" and any(m["sa"] is not None for m in s.get("ll", [])):
-                raise Err("W Lucky Losers są już wyniki. Cofnij do rundy 2, aby zmienić liczbę miejsc.")
-            s["llSpots"] = v
-            if s["phase"] == "ll":
-                start_ll(s)
+            if v is not None and not (0 <= v <= 64):
+                raise Err("Miejsc dla Lucky Losers może być od 0 do 64.")
+            ko_key("llSpots", v)
+        if ko_changed and s["phase"] == "ll":
+            start_ll(s)
         if "rounds" in body:
             v = int(body["rounds"])
             if not 1 <= v <= 6:
@@ -761,7 +892,7 @@ def admin_action(s, body):
     elif act == "reset":
         keep = body.get("keepPlayers")
         ns = new_state()
-        for k in ("title", "edition", "prize", "setsToWin", "scoreMode", "rounds", "format", "groupSize", "groupAdvance", "koSize", "llSpots"):
+        for k in ("title", "edition", "prize", "setsToWin", "scoreMode", "rounds", "format", "groupSize", "groupAdvance", "koSize", "llSpots", "advancePct", "luckyLosers", "llMode"):
             ns[k] = s.get(k, ns[k])
         if keep:
             ns["players"] = s["players"]
@@ -803,7 +934,9 @@ def public(s, admin=False):
     out.setdefault("ll", [])
     out.setdefault("llDirect", [])
     if len(s["players"]) >= 2:
-        _, out["D"], out["L"] = ll_plan(s)
+        kp = knockout_plan(s)
+        out["D"], out["L"], out["llMode"], out["llPool"] = kp["D"], kp["L"], kp["mode"], kp["pool"]
+        out["recPct"] = recommended_pct(len(s["players"]))
     out["tie"] = boundary_tie(s, rank, K) if s["phase"] == "qual" else []
     out["groupTables"] = group_tables(s) if s.get("format") == "groups" else []
     out["D0"] = min(group_direct(s), K) if s.get("format") == "groups" and len(s["players"]) >= 2 else 0
