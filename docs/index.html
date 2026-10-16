@@ -444,7 +444,7 @@ const llNOptions=(D,pool,mode,sel)=>{
   const opts=llCounts(D,pool,mode), rec=recLFor(pool,mode);
   let best=opts.length?opts.reduce((b,x)=>Math.abs(x-rec)<Math.abs(b-rec)?x:b):null;
   const pick=opts.includes(sel)?sel:best;
-  return opts.map(L=>`<option value="${L}" ${L===pick?'selected':''}>${L} · ${Math.round(100*L/Math.max(pool,1))}% ${tr('puli','of the pool')} (${pool})${isPow2(D+L)?' · '+tr('pełna drabinka','full bracket'):''}${L===best?' · '+tr('zalecane','recommended'):''}</option>`).join('');
+  return opts.map(L=>`<option value="${L}" ${L===pick?'selected':''}>${L} · ${Math.round(100*L/Math.max(pool,1))}% ${tr('puli','of the pool')} (${pool})${isPow2(D+L)?' · '+tr('pełna drabinka','full bracket'):''}</option>`).join('');
 };
 function randomTournament(){
   const rnd=(a,b)=>a+Math.floor(Math.random()*(b-a+1));
@@ -877,7 +877,7 @@ function adminPanel(){
   const N=S.players.length, locked=p!=='signup', fmt=S.format||'rounds', R=roundN(), gsz=S.groupSize||4, gadv=S.groupAdvance||2;
   const koLocked=['ko','done'].includes(p);
   const rec=S.recPct||recPctFor(N), pct0=S.advancePct==null?rec:S.advancePct;
-  const pctOpts=directOptions(N,pct0,rec).map(o=>`<option value="${o.pct}" ${o.sel?'selected':''}>${o.d} ${tr(plural(o.d,'osoba','osoby','osób'),o.d===1?'player':'players')} (${o.share}%)${isPow2(o.d)?' · '+tr('pełna drabinka','full bracket'):''}${o.rec?' · '+tr('zalecane','recommended'):''}</option>`).join('');
+  const pctOpts=directOptions(N,pct0,rec).map(o=>`<option value="${o.pct}" ${o.sel?'selected':''}>${o.d} ${tr(plural(o.d,'osoba','osoby','osób'),o.d===1?'player':'players')} (${o.share}%)${isPow2(o.d)?' · '+tr('pełna drabinka','full bracket'):''}</option>`).join('');
   const llOn=S.luckyLosers===true, llMode=S.llMode==='table'?'table':'playoff';
   const base=koPlanFor({N,groups:fmt==='groups',size:gsz,adv:gadv,pct:pct0,ll:false});
   const plan=koPlanFor({N,groups:fmt==='groups',size:gsz,adv:gadv,pct:pct0,ll:llOn,mode:llMode,spots:S.llSpots});
@@ -921,7 +921,9 @@ function adminPanel(){
     <button class="ghost small danger" data-confirm="reset">${tr('Nowy turniej','New tournament')}</button>
   </div>
   <p class="sub" style="margin:0">${tr('Stuknij w mecz, aby wpisać lub poprawić wynik. Zmiana imienia w rozpoczętym turnieju: stuknij w imię poniżej.','Tap a match to enter or correct a result. To rename a player in a running tournament, tap their name below.')}</p>
-  ${p!=='signup'?`<ul class="players">${S.players.map(x=>`<li><button class="x" style="font-size:.95rem;color:inherit;font-weight:600" data-rename="${x.id}">${esc(x.name)} ✎</button></li>`).join('')}</ul>`:''}
+  <h3 style="margin:6px 0 0;font-size:1rem">${tr('Gracze','Players')} (${S.players.length})</h3>
+  <ul class="players">${S.players.map(x=>`<li><button class="x" style="font-size:.95rem;color:inherit;font-weight:600" data-rename="${x.id}" title="${tr('Zmień imię','Rename')}">${esc(x.name)} ✎</button>${p==='signup'?`<button class="x" data-remove="${x.id}" title="${tr('Usuń','Delete')}" aria-label="${tr('Usuń','Delete')} ${esc(x.name)}">✕</button>`:''}</li>`).join('')}</ul>
+  ${p!=='signup'?`<p class="sub" style="margin:0;font-size:.85rem">${tr('Usuwanie graczy jest możliwe tylko w trakcie zapisów. Później można zmienić imię albo dopisać spóźnionego gracza.','Players can only be removed during sign-up. Later you can rename them or add a late player.')}</p>`:''}
   </section>`;
 }
 function toLocalInput(iso){const d=new Date(iso);const z=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`;}
