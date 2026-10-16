@@ -35,8 +35,8 @@ The app was built in Polish, because that's who it was built for, and later got 
 - Manual draw, or an automatic draw at a set time.
 - Adding late players during rounds 1 and 2, so they still get their two matches.
 - Rolling the tournament back to an earlier stage without losing earlier results.
-- Settings: name, match format (1–3 sets), score entry mode, **qualification format** (1–6 random-opponent rounds, or groups with a chosen size and 1–2 advancing per group), and the bracket. Bracket size and Lucky Losers are **one combined choice**: every option is a ready combination, grouped by bracket size with its share of the players in percent, with or without Lucky Losers (for example "8 places · 40% of players: no Lucky Losers, 8 straight in" or "6 straight in + 2 via Lucky Losers"). There is no hidden automatic setting. With groups the bracket size follows from the group size and the number of advancing players and is locked, and only the Lucky Losers part can be chosen.
-- **Suggestions computed from the number of players.** The organizer panel shows the best three ready-made options (the rest is folded away), each with what it means in practice, separately for rounds and for groups, and applies one with a click. For example with 20 players: ★ 8 bracket places (6 straight in + 2 via Lucky Losers, 40% advance), the same without Lucky Losers, 8 places with 4 Lucky Losers spots, 4 places, or 16 places (80% advance). The bracket-size and Lucky Losers lists also adapt to the number of players (bracket sizes from 2 to 64).
+- Settings: name, match format (1–3 sets), score entry mode, **qualification format** (1–6 random-opponent rounds, or groups with a chosen size and 1–2 advancing per group) and the **knockout stage** (see below). There is no hidden automatic setting: every choice is explicit.
+- **Knockout stage settings, computed from the number of players.** The organizer picks what share of the field advances directly (70% down to 10%, with the resulting number of players next to each percentage, always an **even** number rounded **up**, recommended: the one closest to half of the players). **Lucky Losers** are a yes/no choice. If yes, a second list shows how many join the direct qualifiers (always a count that keeps the bracket even, recommended: about half of the pool of players who did not qualify directly), and a third choice says how they are decided: a **play-off** (they play one more match against each other) or **by the table** (they simply advance by their position). In groups mode the direct qualifiers are the top 1–2 of every group and the Lucky Losers come from the players placed right behind them (e.g. the third places, each group contributes one). A live summary under the choices says what it all means, for example "10 straight in + 2 Lucky Losers = 12 players, play-in round: the 8 lowest seeds play 4 matches, the best 4 have a bye".
 
 **Tournament format.** The organizer picks the qualification format before the draw:
 
@@ -50,8 +50,8 @@ The app was built in Polish, because that's who it was built for, and later got 
 2. The top 1 or 2 of every group advance directly. The bracket places that are left go to the **best of the rest** (for example the best third-placed players), compared by per-match averages so that groups of different size are fair. Optionally some of those places are decided in Lucky Losers matches.
 
 Then, in both formats:
-- **Lucky Losers** (optional). The best players outside direct qualification play one match (higher-ranked vs lower-ranked), and the winners fill the remaining bracket spots. They can be switched off.
-- **Bracket.** Seeded 1st vs last, 2nd vs second-to-last and so on (after groups, the first round avoids pairing two players from the same group where possible), plus a third-place match and the podium.
+- **Lucky Losers** (optional). Players from outside direct qualification who are added to the knockout stage, either after a play-off match (higher-ranked vs lower-ranked, the winners go through) or simply by the table. They can be switched off.
+- **Bracket.** Any number of players works, not only powers of two. Seeded 1st vs last, 2nd vs second-to-last and so on (after groups, the first matches avoid pairing two players from the same group where possible), plus a third-place match and the podium. When the number of players is not a power of two, the lowest seeds play a **play-in round** and the best of the table have a **bye** (for 10 players: 4 play 2 matches, the best 6 wait). It is always a single elimination with exactly M−1 matches, byes go to the best of the table, and options that give a full bracket are marked in the panel.
 
 With an odd number of players in a round, the player without a pair gets an extra match against a random opponent that only counts for them.
 
@@ -71,9 +71,13 @@ With an odd number of players in a round, the player without a pair gets an extr
 |---|---|
 | ![Entering the points of every set](docs/screenshots/sets-dialog-en.jpg) | ![Wpisywanie punktów każdego seta](docs/screenshots/sets-dialog-pl.jpg) |
 
-| Organizer panel: bracket suggestions for 20 players (EN) | Panel organizatora: propozycje drabinki dla 20 graczy (PL) |
+| Organizer panel: knockout stage settings (EN) | Panel organizatora: ustawienia fazy pucharowej (PL) |
 |---|---|
-| ![Bracket and Lucky Losers suggestions](docs/screenshots/bracket-plans-en.jpg) | ![Propozycje drabinki i Lucky Losers](docs/screenshots/bracket-plans-pl.jpg) |
+| ![Knockout stage settings](docs/screenshots/knockout-panel-en.png) | ![Ustawienia fazy pucharowej](docs/screenshots/knockout-panel-pl.png) |
+
+| Bracket with a play-in round: 10 players, the best 6 have a bye (EN) | Drabinka z rundą wstępną: 10 graczy, 6 najlepszych ma wolny los (PL) |
+|---|---|
+| ![Bracket with a play-in round](docs/screenshots/bracket-playin-en.png) | ![Drabinka z rundą wstępną](docs/screenshots/bracket-playin-pl.png) |
 
 | Group stage: group tables with the qualification line (EN) | Faza grupowa: tabele grup z linią awansu (PL) |
 |---|---|
@@ -110,8 +114,8 @@ The version that ran at the event was built for one evening and one company. Bef
 | **Language versions** | An English interface next to the Polish one: PL/EN switch, browser language as the default, `?lang=en` to force a language, choice remembered per device. Every label, dialog, toast and stat card has both languages, server and engine messages are translated in the browser, and the default tournament title is shown translated. The documentation is in English. |
 | **Better page layout** | One standings table instead of two, with a view for the qualification cut-offs and a Status column (who is still in, who drops out). Stats are collapsible and sit right under the bracket. The organizer panel is a pop-up behind a button, and a "How it works" button in the top bar replaces scrolling to the bottom. Stat cards, the floating buttons and the mobile layout were checked in a real browser. |
 | **Match timer, set scoring and stats** | The organizer taps *Start* on a match and entering the result ends it. Matches to 2 or 3 sets take the points of every set (11:9, 7:11, 12:10) and work out the match score themselves, or the organizer can choose the faster sets-only mode. Stats show match times, deuce games, tight finishes, the biggest upset, matches that went the distance and the comeback king. Both the browser engine and the Python server do the same, and both have tests. |
-| **Qualification formats** | Besides the original two rounds the organizer can choose 1 to 6 random-opponent rounds or a group stage with round-robin groups, group tables, qualifiers from every group plus the best of the rest, and first-round pairings that avoid same-group clashes. Bracket size and Lucky Losers are one explicit combined choice with percentages (locked to the groups in group mode) instead of two dependent lists and an automatic setting. Both engines implement it and have tests (rounds 1–6, groups of several sizes, late players). |
-| **Demo** | The page works without a server on GitHub Pages. A *Random tournament* button generates a tournament of a random size and format, and 60 of 60 random tournaments (groups and 1–4 rounds, all score entry modes) were played through to the podium to check it. |
+| **Qualification and knockout formats** | Besides the original two rounds the organizer can choose 1 to 6 random-opponent rounds or a group stage with round-robin groups. The knockout stage is set by the share of players that advance (even numbers, rounded up, recommended near 50%), with optional Lucky Losers decided by a play-off or by the table, and works for any even number of players thanks to a play-in round with byes for the best seeds. Both engines implement it and have tests (rounds 1–6, groups of several sizes, every percentage, both Lucky Losers modes, late players, M−1 matches in every bracket). |
+| **Demo** | The page works without a server on GitHub Pages. A *Random tournament* button generates a tournament of a random size and format, and 80 of 80 random tournaments (groups and 1–4 rounds, Lucky Losers off, by play-off and by the table, all score entry modes) were played through to the podium to check it. |
 | **Screenshots** | Retaken from the running app (headless Chrome, with seeded random results so they are reproducible): desktop and phone, light and dark, **in English and in Polish**. They only show the anonymised demo data. |
 | **Publishing** | GitHub Pages with a workflow that publishes `docs/` on every push, a custom domain, and a link preview (`og:` tags) for messaging apps. |
 
