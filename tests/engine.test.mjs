@@ -88,6 +88,67 @@ assert.deepEqual([s.K, s.D, s.L], [8, 6, 2]);
 assert.throws(() => E.request('api/admin', { action: 'settings', llSpots: 17 }));
 assert.throws(() => E.request('api/admin', { action: 'settings', koSize: 12 }));
 
+// The organizer picks how many random-opponent rounds are played: everyone plays that many matches.
+for (const rounds of [1, 2, 3, 4, 6]) {
+  for (const n of [5, 8, 13]) {
+    store.clear();
+    E.freshWithPlayers(Array.from({ length: n }, (_, i) => `Gracz ${i}`));
+    E.request('api/admin', { action: 'settings', rounds });
+    s = playOut(E.request('api/admin', { action: 'draw' }));
+    assert.equal(s.phase, 'done', `rounds=${rounds} n=${n}`);
+    assert.ok(Math.min(...s.ranking.map((r) => r.played)) >= rounds, `rounds=${rounds} n=${n}: everyone plays ${rounds} matches`);
+    assert.equal(s.ranking.length, n);
+  }
+}
+// Rounds 3+ pair players with the same record and avoid rematches where possible.
+store.clear();
+E.freshWithPlayers(Array.from({ length: 16 }, (_, i) => `Gracz ${i}`));
+E.request('api/admin', { action: 'settings', rounds: 4 });
+s = E.request('api/admin', { action: 'draw' });
+const seen = new Set();
+for (let r = 1; r <= 4; r++) {
+  assert.equal(s.phase, 'r' + r);
+  for (const m of s['r' + r]) { const k = [m.a, m.b].sort().join('|'); assert.ok(!seen.has(k), `rematch in round ${r}`); seen.add(k); }
+  s = E.simulateStage();
+}
+assert.notEqual(s.phase, 'r4');
+
+// Group format: round-robin groups, top of every group plus the best of the rest fill the bracket.
+for (const [n, size, adv] of [[6, 3, 2], [9, 3, 2], [12, 4, 2], [13, 4, 1], [20, 4, 2], [20, 5, 2], [26, 4, 2], [40, 5, 2], [64, 4, 2]]) {
+  store.clear();
+  E.freshWithPlayers(Array.from({ length: n }, (_, i) => `Gracz ${i}`));
+  E.request('api/admin', { action: 'settings', format: 'groups', groupSize: size, groupAdvance: adv });
+  s = E.request('api/admin', { action: 'draw' });
+  const tag = `n=${n} size=${size} adv=${adv}`;
+  assert.equal(s.phase, 'groups', tag);
+  assert.equal(s.groups.reduce((t, g) => t + g.ids.length, 0), n, tag);
+  const sizes = s.groups.map((g) => g.ids.length);
+  assert.ok(Math.max(...sizes) - Math.min(...sizes) <= 1, `${tag}: balanced groups`);
+  for (const g of s.groups) assert.equal(s.gm.filter((m) => m.g === g.id).length, g.ids.length * (g.ids.length - 1) / 2, `${tag}: round robin`);
+  const K0 = s.K;
+  s = playOut(s);
+  assert.equal(s.phase, 'done', tag);
+  assert.equal(new Set(s.ko.rounds[0].flatMap((m) => [m.a, m.b])).size, K0, `${tag}: full bracket`);
+  const grp = {}; s.groups.forEach((g) => g.ids.forEach((id) => (grp[id] = g.id)));
+  const clashes = s.ko.rounds[0].filter((m) => grp[m.a] === grp[m.b]).length;
+  assert.ok(clashes <= 1, `${tag}: avoid same-group first-round pairs (${clashes})`);
+  // everyone plays everyone in their group
+  assert.ok(s.ranking.every((r) => r.played === s.groups.find((g) => g.id === r.group).ids.length - 1), tag);
+}
+// Late player in the group stage joins the smallest group and plays all of it.
+store.clear();
+E.freshWithPlayers(Array.from({ length: 11 }, (_, i) => `Gracz ${i}`));
+E.request('api/admin', { action: 'settings', format: 'groups', groupSize: 4, groupAdvance: 2 });
+s = E.request('api/admin', { action: 'draw' });
+const before = s.gm.length, small = Math.min(...s.groups.map((g) => g.ids.length));
+s = E.request('api/admin', { action: 'late', name: 'Spozniony' });
+assert.equal(s.gm.length, before + small);
+s = playOut(s);
+assert.equal(s.phase, 'done');
+// Settings are locked after the draw.
+assert.throws(() => E.request('api/admin', { action: 'settings', format: 'rounds' }));
+assert.throws(() => E.request('api/admin', { action: 'settings', rounds: 3 }));
+
 // The sample demo data loads and is a finished tournament.
 store.clear();
 s = E.loadState(JSON.parse(readFileSync(new URL('../docs/demo-data.json', import.meta.url), 'utf8')));

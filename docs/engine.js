@@ -35,13 +35,17 @@
 
   function newState() {
     return {
-      title: DEFAULT_TITLE, edition: 'Edycja 2026', prize: '', setsToWin: 1, scoreMode: 'points',
+      title: DEFAULT_TITLE, edition: 'Edycja 2026', prize: '', setsToWin: 1, scoreMode: 'points', format: 'rounds', groupSize: 4, groupAdvance: 2, groups: [], gm: [],
       koSize: null, llSpots: null, deadline: null, phase: 'signup', players: [],
-      r1: [], r2: [], ll: [], llDirect: [], sel: null, ko: null, rev: 0, updated: now(),
+      r1: [], r2: [], r3: [], r4: [], r5: [], r6: [], rounds: 2, ll: [], llDirect: [], sel: null, ko: null, rev: 0, updated: now(),
     };
   }
 
   // ---------- tournament logic (1:1 with server.py) ----------
+
+  // the random-opponent rounds r1..r6 (the organizer picks how many are played, default 2)
+  const ROUND_KEYS = ['r1', 'r2', 'r3', 'r4', 'r5', 'r6'];
+  const allRoundMatches = (s) => ROUND_KEYS.flatMap((k) => s[k] || []);
 
   const valid = (sa, sb, T) => isInt(sa) && isInt(sb) && sa >= 0 && sb >= 0 && Math.max(sa, sb) === T && Math.min(sa, sb) < T;
 
@@ -55,23 +59,30 @@
     return w === m.a ? m.b : m.a;
   }
 
-  function pair(ids, everyone, pool = null) {
-    ids = shuffle([...ids]);
-    const out = [];
-    while (ids.length >= 2) out.push({ id: mid(), a: ids.pop(), b: ids.pop(), sa: null, sb: null, half: false, pool });
-    if (ids.length) {
-      const x = ids.pop();
-      const others = everyone.filter((p) => p !== x);
-      if (others.length) out.push({ id: mid(), a: x, b: choice(others), sa: null, sb: null, half: true, pool });
+  function pair(ids, everyone, pool = null, played = null) {
+    const pk = (a, b) => (a < b ? a + '|' + b : b + '|' + a);
+    let best = null, bestScore = Infinity;
+    for (let t = 0, tries = played ? 60 : 1; t < tries && bestScore > 0; t++) {
+      const xs = shuffle([...ids]);
+      const out = [];
+      while (xs.length >= 2) out.push({ id: mid(), a: xs.pop(), b: xs.pop(), sa: null, sb: null, half: false, pool });
+      if (xs.length) {
+        const x = xs.pop();
+        const others = everyone.filter((p) => p !== x);
+        const fresh = played ? others.filter((o) => !played.has(pk(x, o))) : others;
+        if (others.length) out.push({ id: mid(), a: x, b: choice(fresh.length ? fresh : others), sa: null, sb: null, half: true, pool });
+      }
+      const score = played ? out.filter((m) => played.has(pk(m.a, m.b))).length : 0;
+      if (score < bestScore) { bestScore = score; best = out; }
     }
-    return out;
+    return best;
   }
 
   function stats(s) {
     const T = s.setsToWin;
     const st = {};
     s.players.forEach((p) => (st[p.id] = { w: 0, l: 0, sw: 0, sl: 0, pw: 0, pl: 0, played: 0 }));
-    for (const m of [...s.r1, ...s.r2]) {
+    for (const m of [...allRoundMatches(s), ...(s.gm || [])]) {
       if (!(m.a && m.b && valid(m.sa, m.sb, T))) continue;
       const pa = m.pa || 0, pb = m.pb || 0;
       const sides = [['a', m.sa, m.sb, pa, pb]];
@@ -89,7 +100,92 @@
   const key = (x) => [x.w, x.sw - x.sl, x.pw - x.pl, x.pw, x.sw];
   const sameKey = (a, b) => key(a).every((v, i) => v === key(b)[i]);
 
+  // ---------- group format: round-robin groups instead of rounds 1-2 ----------
+  const groupSizes = (N, size) => {
+    const G = Math.max(1, Math.floor(N / size + 0.5));
+    const base = Math.floor(N / G), extra = N % G;
+    return Array.from({ length: G }, (_, g) => base + (g < extra ? 1 : 0));
+  };
+  function makeGroups(ids, size) {
+    const sizes = groupSizes(ids.length, size), order = shuffle([...ids]);
+    let pos = 0;
+    return sizes.map((n, g) => { const out = { id: String.fromCharCode(65 + g), ids: order.slice(pos, pos + n) }; pos += n; return out; });
+  }
+  // circle method: every player plays everyone in the group once, in rounds
+  function roundRobin(ids) {
+    const xs = [...ids];
+    if (xs.length % 2) xs.push(null);
+    const n = xs.length, rounds = [];
+    for (let r = 0; r < n - 1; r++) {
+      const ps = [];
+      for (let i = 0; i < n / 2; i++) { const a = xs[i], b = xs[n - 1 - i]; if (a && b) ps.push([a, b]); }
+      rounds.push(ps);
+      xs.splice(1, 0, xs.pop());
+    }
+    return rounds;
+  }
+  function groupMatches(groups) {
+    const out = [];
+    groups.forEach((g) => roundRobin(g.ids).forEach((ps, r) => ps.forEach(([a, b]) =>
+      out.push({ id: mid(), a, b, sa: null, sb: null, pa: null, pb: null, sets: null, half: false, g: g.id, rd: r + 1 }))));
+    return out.sort((x, y) => x.rd - y.rd || (x.g < y.g ? -1 : x.g > y.g ? 1 : 0));
+  }
+  // players who go straight to the bracket from their group (top `groupAdvance` of every group)
+  const groupDirect = (s) => {
+    const adv = s.groupAdvance || 2;
+    const sizes = (s.groups && s.groups.length) ? s.groups.map((g) => g.ids.length) : groupSizes(s.players.length, s.groupSize || 4);
+    return sizes.reduce((n, z) => n + Math.min(adv, z), 0);
+  };
+  function groupTables(s) {
+    const st = stats(s), names = {};
+    s.players.forEach((p) => (names[p.id] = p.name));
+    const cmp = (i, j) => {
+      const ki = key(st[i]), kj = key(st[j]);
+      for (let n = 0; n < ki.length; n++) if (ki[n] !== kj[n]) return kj[n] - ki[n];
+      const a = names[i].toLowerCase(), b = names[j].toLowerCase();
+      return a < b ? -1 : a > b ? 1 : 0;
+    };
+    return (s.groups || []).map((g) => {
+      const ms = (s.gm || []).filter((m) => m.g === g.id);
+      const rows = [...g.ids].sort(cmp).map((id, i) => Object.assign({ id, name: names[id], rank: i + 1 }, st[id]));
+      return { id: g.id, done: ms.length > 0 && ms.every((m) => m.a && m.b && valid(m.sa, m.sb, s.setsToWin)), rows };
+    });
+  }
+  // Cross-group order: group qualifiers first (by group position, then per-match averages so that
+  // groups of different size are comparable), then everyone else the same way.
+  function groupRanking(s) {
+    const adv = s.groupAdvance || 2;
+    const avg = (r) => { const n = Math.max(1, r.played); return [r.w / n, (r.sw - r.sl) / n, (r.pw - r.pl) / n, r.pw / n]; };
+    const cmp = (a, b) => {
+      const x = avg(a), y = avg(b);
+      for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return y[i] - x[i];
+      const p = a.name.toLowerCase(), q = b.name.toLowerCase();
+      return p < q ? -1 : p > q ? 1 : 0;
+    };
+    const rows = groupTables(s).flatMap((g) => g.rows.map((r) => { const o = Object.assign({}, r, { group: g.id, grank: r.rank }); delete o.rank; return o; }));
+    const byRank = (a, b) => a.grank - b.grank || cmp(a, b);
+    return [...rows.filter((r) => r.grank <= adv).sort(byRank), ...rows.filter((r) => r.grank > adv).sort(byRank)];
+  }
+  // first-round bracket pairs (seed i vs seed K-1-i) should not be two players from the same group
+  function avoidGroupClashes(s, ordered) {
+    if (s.format !== 'groups') return ordered;
+    const grp = {};
+    (s.groups || []).forEach((g) => g.ids.forEach((id) => (grp[id] = g.id)));
+    const K = ordered.length, out = [...ordered], half = K / 2;
+    for (let i = 0; i < half; i++) {
+      const ib = K - 1 - i;
+      if (!grp[out[i]] || grp[out[i]] !== grp[out[ib]]) continue;
+      for (let j = 0; j < half; j++) {
+        if (j === i) continue;
+        const jb = K - 1 - j;
+        if (grp[out[i]] !== grp[out[jb]] && grp[out[j]] !== grp[out[ib]]) { [out[ib], out[jb]] = [out[jb], out[ib]]; break; }
+      }
+    }
+    return out;
+  }
+
   function ranking(s) {
+    if (s.format === 'groups') return groupRanking(s);
     const st = stats(s);
     const names = {};
     s.players.forEach((p) => (names[p.id] = p.name));
@@ -112,7 +208,15 @@
     while (k * 2 <= Math.max(2, Math.floor(n * 0.75))) k *= 2;
     return Math.min(k, pow2Floor(n));
   }
-  const koSize = (s) => Math.min(s.koSize || defaultK(s.players.length), pow2Floor(s.players.length));
+  function koSize(s) {
+    const N = s.players.length;
+    let k = s.koSize;
+    if (!k) {
+      if (s.format === 'groups') { k = 2; const d = groupDirect(s); while (k < d) k *= 2; }
+      else k = defaultK(N);
+    }
+    return Math.min(k, pow2Floor(N));
+  }
 
   function boundaryTie(rank, K) {
     if (rank.length <= K) return [];
@@ -121,6 +225,7 @@
   }
 
   function buildKo(s, ordered) {
+    ordered = avoidGroupClashes(s, ordered);
     const K = ordered.length;
     const r0 = [];
     for (let i = 0; i < K / 2; i++) r0.push({ id: mid(), a: ordered[i], b: ordered[K - 1 - i], sa: null, sb: null });
@@ -157,16 +262,43 @@
 
   const allDone = (ms, T) => ms.every((m) => m.a && m.b && valid(m.sa, m.sb, T));
 
-  function r1Result(s, pid) {
-    const T = s.setsToWin;
-    for (const m of s.r1) if (m.a === pid || (m.b === pid && !m.half)) return winner(m, T) === pid;
-    return false;
+  // wins of every player in the rounds played so far (an extra "half" match only counts for its first player)
+  function winsSoFar(s) {
+    const T = s.setsToWin, w = {};
+    s.players.forEach((p) => (w[p.id] = 0));
+    for (const m of allRoundMatches(s)) {
+      const win = winner(m, T);
+      if (win && (win === m.a || !m.half)) w[win] = (w[win] || 0) + 1;
+    }
+    return w;
+  }
+
+  // Round k >= 2: players with the same number of wins play each other (round 2 = winners vs winners,
+  // losers vs losers). From round 3 on, rematches are avoided where possible.
+  function nextRound(s, k) {
+    const ids = s.players.map((p) => p.id), w = winsSoFar(s), played = new Set();
+    for (const m of allRoundMatches(s)) if (m.a && m.b) played.add(m.a < m.b ? m.a + '|' + m.b : m.b + '|' + m.a);
+    const byWins = {};
+    ids.forEach((i) => (byWins[w[i]] = byWins[w[i]] || []).push(i));
+    const out = [];
+    Object.keys(byWins).map(Number).sort((a, b) => b - a).forEach((wins) => {
+      const grp = byWins[wins];
+      out.push(...pair(grp, grp.length > 1 ? grp : ids, k === 2 ? (wins > 0 ? 'win' : 'lose') : 'w' + wins, k > 2 ? played : null));
+    });
+    return out;
   }
 
   function llPlan(s) {
     const N = s.players.length, K = koSize(s);
-    let L = s.llSpots == null ? Math.max(1, Math.floor(K / 4)) : s.llSpots; // 0 = no Lucky Losers
-    L = Math.max(0, Math.min(L, K, N - K));
+    let L;
+    if (s.format === 'groups') {
+      // the best of the rest go straight in by default; Lucky Losers only fill spots beyond the group qualifiers
+      L = s.llSpots == null ? 0 : s.llSpots;
+      L = Math.max(0, Math.min(L, K - Math.min(groupDirect(s), K), N - K));
+    } else {
+      L = s.llSpots == null ? Math.max(1, Math.floor(K / 4)) : s.llSpots; // 0 = no Lucky Losers
+      L = Math.max(0, Math.min(L, K, N - K));
+    }
     return [K, K - L, L];
   }
 
@@ -183,14 +315,15 @@
 
   function advance(s) {
     const T = s.setsToWin;
-    if (s.phase === 'r1' && s.r1.length && allDone(s.r1, T)) {
-      const ids = s.players.map((p) => p.id);
-      const win = ids.filter((i) => r1Result(s, i));
-      const lose = ids.filter((i) => !r1Result(s, i));
-      s.r2 = [...pair(win, win.length > 1 ? win : ids, 'win'), ...pair(lose, lose.length > 1 ? lose : ids, 'lose')];
-      s.phase = 'r2';
+    const R = s.rounds || 2;
+    for (let k = 1; k <= R; k++) {
+      const key = 'r' + k;
+      if (s.phase === key && (s[key] || []).length && allDone(s[key], T)) {
+        if (k < R) { s['r' + (k + 1)] = nextRound(s, k + 1); s.phase = 'r' + (k + 1); }
+        else startLl(s);
+      }
     }
-    if (s.phase === 'r2' && allDone(s.r2, T)) startLl(s);
+    if (s.phase === 'groups' && (s.gm || []).length && allDone(s.gm, T)) startLl(s);
     if (s.phase === 'll' && allDone(s.ll || [], T)) {
       const rank = ranking(s).map((r) => r.id);
       const winners = s.ll.map((m) => winner(m, T)).sort((a, b) => rank.indexOf(a) - rank.indexOf(b));
@@ -201,8 +334,14 @@
   function draw(s) {
     if (s.players.length < 3) throw new Err('Do losowania potrzeba co najmniej 3 zawodników.');
     const ids = s.players.map((p) => p.id);
-    s.r1 = pair(ids, ids);
-    Object.assign(s, { r2: [], sel: null, ko: null, ll: [], llDirect: [], phase: 'r1' });
+    if (s.format === 'groups') {
+      s.groups = makeGroups(ids, s.groupSize || 4);
+      s.gm = groupMatches(s.groups);
+      Object.assign(s, { r1: [], r2: [], r3: [], r4: [], r5: [], r6: [], sel: null, ko: null, ll: [], llDirect: [], phase: 'groups' });
+    } else {
+      s.r1 = pair(ids, ids);
+      Object.assign(s, { r2: [], r3: [], r4: [], r5: [], r6: [], sel: null, ko: null, ll: [], llDirect: [], phase: 'r1', groups: [], gm: [] });
+    }
     advance(s);
   }
 
@@ -216,7 +355,8 @@
 
   function findMatch(s, stage, id) {
     let pool = [];
-    if (['r1', 'r2', 'll'].includes(stage)) pool = s[stage] || [];
+    if ([...ROUND_KEYS, 'll'].includes(stage)) pool = s[stage] || [];
+    else if (stage === 'g') pool = s.gm || [];
     else if (stage === 'ko' && s.ko) pool = s.ko.rounds.flat();
     else if (stage === 'third' && s.ko && s.ko.third) pool = [s.ko.third];
     const m = pool.find((x) => x.id === id);
@@ -224,7 +364,7 @@
     return m;
   }
 
-  const STAGE_PHASE = { r1: ['r1'], r2: ['r2'], ll: ['ll'], ko: ['ko', 'done'], third: ['ko', 'done'] };
+  const STAGE_PHASE = { r1: ['r1'], r2: ['r2'], r3: ['r3'], r4: ['r4'], r5: ['r5'], r6: ['r6'], g: ['groups'], ll: ['ll'], ko: ['ko', 'done'], third: ['ko', 'done'] };
   const pointsOk = (pa, pb) => [pa, pb].every((v) => isInt(v) && v >= 0 && v <= 99) && Math.max(pa, pb) >= 11 && Math.abs(pa - pb) >= 2;
 
   // Match to several sets: the points of every set are entered, the match score (e.g. 2:1) is derived from them.
@@ -266,7 +406,7 @@
     if (!(m.a && m.b)) throw new Err('W tym meczu nie ma jeszcze obu zawodników.');
     const clearing = (sa === null || sa === undefined) && (sb === null || sb === undefined);
     if (!clearing && !valid(sa, sb, T)) throw new Err(`Mecz gramy do ${T} wygranych setów. Sprawdź wynik.`);
-    if (['r1', 'r2', 'll'].includes(stage) && !STAGE_PHASE[stage].includes(s.phase)) {
+    if ([...ROUND_KEYS, 'g', 'll'].includes(stage) && !STAGE_PHASE[stage].includes(s.phase)) {
       const oldW = winner(m, T);
       const newW = clearing ? null : sa > sb ? m.a : m.b;
       if (oldW !== newW) throw new Err('Ta zmiana zmienia zwycięzcę zamkniętej rundy. Najpierw cofnij turniej do tej rundy w panelu organizatora.');
@@ -333,6 +473,29 @@
           if (s.phase === 'll') startLl(s);
         }
       }
+      if ('rounds' in body) {
+        const v = parseInt(body.rounds, 10);
+        if (!(v >= 1 && v <= 6)) throw new Err('Liczba rund może wynosić od 1 do 6.');
+        if (s.phase !== 'signup' && v !== (s.rounds || 2)) throw new Err('Liczbę rund można zmienić tylko przed losowaniem.');
+        s.rounds = v;
+      }
+      if ('format' in body) {
+        if (!['rounds', 'groups'].includes(body.format)) throw new Err('Nieznany format turnieju.');
+        if (s.phase !== 'signup' && body.format !== (s.format || 'rounds')) throw new Err('Format turnieju można zmienić tylko przed losowaniem.');
+        s.format = body.format;
+      }
+      if ('groupSize' in body) {
+        const v = parseInt(body.groupSize, 10);
+        if (!(v >= 3 && v <= 6)) throw new Err('Grupa może mieć od 3 do 6 graczy.');
+        if (s.phase !== 'signup' && v !== (s.groupSize || 4)) throw new Err('Wielkość grup można zmienić tylko przed losowaniem.');
+        s.groupSize = v;
+      }
+      if ('groupAdvance' in body) {
+        const v = parseInt(body.groupAdvance, 10);
+        if (![1, 2].includes(v)) throw new Err('Z grupy może awansować 1 lub 2 graczy.');
+        if (s.phase !== 'signup' && v !== (s.groupAdvance || 2)) throw new Err('Liczbę awansujących z grupy można zmienić tylko przed losowaniem.');
+        s.groupAdvance = v;
+      }
       if ('scoreMode' in body) {
         if (!['points', 'sets'].includes(body.scoreMode)) throw new Err('Nieznany tryb wpisywania wyników.');
         s.scoreMode = body.scoreMode;
@@ -353,34 +516,48 @@
     } else if (act === 'add') {
       addPlayer(s, body.name);
     } else if (act === 'late') {
-      if (!['r1', 'r2'].includes(s.phase)) throw new Err('Spóźnionego gracza można dopisać w rundzie 1 lub 2.');
+      if (!['groups', ...ROUND_KEYS].includes(s.phase)) throw new Err('Spóźnionego gracza można dopisać w trakcie rund lub grup.');
       const others = s.players.map((p) => p.id);
       const phase = s.phase;
       s.phase = 'signup';
       let p;
       try { [p] = addPlayer(s, body.name); } finally { s.phase = phase; }
-      if (phase === 'r1') {
+      if (phase === 'groups') {
+        // the new player joins the smallest group and plays everyone in it
+        const g = [...s.groups].sort((x, y) => x.ids.length - y.ids.length || (x.id < y.id ? -1 : 1))[0];
+        let rd = Math.max(0, ...s.gm.filter((m) => m.g === g.id).map((m) => m.rd || 0));
+        g.ids.forEach((o) => s.gm.push({ id: mid(), a: p.id, b: o, sa: null, sb: null, pa: null, pb: null, sets: null, half: false, g: g.id, rd: ++rd }));
+        g.ids.push(p.id);
+      } else if (phase === 'r1') {
         const spare = s.r1.find((m) => m.half && m.sa === null);
         if (spare) Object.assign(spare, { b: p.id, half: false });
         else s.r1.push({ id: mid(), a: p.id, b: choice(others), sa: null, sb: null, half: true, pool: null });
       } else {
-        for (const opp of shuffle([...others]).slice(0, 2))
-          s.r2.push({ id: mid(), a: p.id, b: opp, sa: null, sb: null, half: true, pool: 'lose' });
+        // joining in round k: k matches against random opponents, counted only for the late player
+        const k = +phase.slice(1);
+        for (const opp of shuffle([...others]).slice(0, Math.min(k, others.length)))
+          s[phase].push({ id: mid(), a: p.id, b: opp, sa: null, sb: null, half: true, pool: k === 2 ? 'lose' : 'w0' });
       }
     } else if (act === 'draw') {
       if (s.phase !== 'signup') throw new Err('Losowanie już się odbyło.');
       draw(s);
     } else if (act === 'reopen') {
-      Object.assign(s, { phase: 'signup', r1: [], r2: [], sel: null, ko: null, ll: [], llDirect: [], deadline: null });
+      Object.assign(s, { phase: 'signup', r1: [], r2: [], r3: [], r4: [], r5: [], r6: [], groups: [], gm: [], sel: null, ko: null, ll: [], llDirect: [], deadline: null });
     } else if (act === 'rollback') {
       const to = body.to;
-      if (to === 'r1' && s.r1.length) Object.assign(s, { phase: 'r1', r2: [], sel: null, ko: null, ll: [], llDirect: [] });
-      else if (to === 'r2' && s.r2.length) { Object.assign(s, { phase: 'r2', sel: null, ko: null, ll: [], llDirect: [] }); advance(s); }
+      const rk = ROUND_KEYS.indexOf(to);
+      if (rk >= 0 && (s[to] || []).length) {
+        const later = {};
+        ROUND_KEYS.slice(rk + 1).forEach((q) => (later[q] = []));
+        Object.assign(s, later, { phase: to, sel: null, ko: null, ll: [], llDirect: [] });
+        if (rk > 0) advance(s);
+      }
+      else if (to === 'groups' && (s.gm || []).length) { Object.assign(s, { phase: 'groups', sel: null, ko: null, ll: [], llDirect: [] }); advance(s); }
       else if (to === 'll' && (s.ll || []).length) { Object.assign(s, { phase: 'll', ko: null }); advance(s); }
       else throw new Err('Nie można cofnąć do tego etapu.');
     } else if (act === 'reset') {
       const ns = newState();
-      for (const k of ['title', 'edition', 'prize', 'setsToWin', 'scoreMode', 'koSize', 'llSpots']) ns[k] = s[k] ?? ns[k];
+      for (const k of ['title', 'edition', 'prize', 'setsToWin', 'scoreMode', 'rounds', 'format', 'groupSize', 'groupAdvance', 'koSize', 'llSpots']) ns[k] = s[k] ?? ns[k];
       if (body.keepPlayers) ns.players = s.players;
       ns.rev = s.rev || 0;
       Object.keys(s).forEach((k) => delete s[k]);
@@ -393,7 +570,7 @@
   function publicState(s) {
     const out = clone(s);
     out.players = s.players.map((p) => ({ id: p.id, name: p.name }));
-    const rank = s.r1.length ? ranking(s) : [];
+    const rank = (s.r1.length || (s.gm || []).length) ? ranking(s) : [];
     out.ranking = rank;
     const K = s.players.length >= 2 ? koSize(s) : 0;
     out.K = K;
@@ -401,6 +578,8 @@
     out.llDirect = out.llDirect || [];
     if (s.players.length >= 2) [, out.D, out.L] = llPlan(s);
     out.tie = s.phase === 'qual' ? boundaryTie(rank, K) : [];
+    out.groupTables = s.format === 'groups' ? groupTables(s) : [];
+    out.D0 = s.format === 'groups' && s.players.length >= 2 ? Math.min(groupDirect(s), out.K) : 0;
     out.admin = true;
     out.demo = true;
     out.serverTime = now();
@@ -476,9 +655,9 @@
     const s = clone(load());
     const T = s.setsToWin;
     const pointsMode = (s.scoreMode || 'points') === 'points';
-    const stage = { r1: 'r1', r2: 'r2', ll: 'll', ko: 'ko' }[s.phase];
+    const stage = { r1: 'r1', r2: 'r2', r3: 'r3', r4: 'r4', r5: 'r5', r6: 'r6', groups: 'g', ll: 'll', ko: 'ko' }[s.phase];
     if (!stage) throw new Error('Na tym etapie nie ma meczów do rozegrania.');
-    const pool = stage === 'ko' ? [...s.ko.rounds.flat().map((m) => ['ko', m]), ...(s.ko.third ? [['third', s.ko.third]] : [])] : s[stage].map((m) => [stage, m]);
+    const pool = stage === 'ko' ? [...s.ko.rounds.flat().map((m) => ['ko', m]), ...(s.ko.third ? [['third', s.ko.third]] : [])] : stage === 'g' ? (s.gm || []).map((m) => ['g', m]) : s[stage].map((m) => [stage, m]);
     const todo = pool.filter(([, m]) => m.a && m.b && m.sa === null);
     if (!todo.length) throw new Error('Wszystkie gotowe mecze tego etapu mają już wyniki.');
     // In the bracket we play one round at a time so the winners can be seen advancing.

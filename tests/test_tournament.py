@@ -32,6 +32,8 @@ def play(s, rng, late_in=None):
             ms = [(m, "ko") for r in s["ko"]["rounds"] for m in r]
             if s["ko"]["third"]:
                 ms.append((s["ko"]["third"], "third"))
+        elif ph == "groups":
+            ms = [(m, "g") for m in s["gm"]]
         else:
             ms = [(m, ph) for m in s[ph]]
         todo = [(m, st) for m, st in ms if m["a"] and m["b"] and m["sa"] is None]
@@ -205,6 +207,64 @@ class TournamentTest(unittest.TestCase):
             S.admin_action(s, {"action": "settings", "llSpots": 17})
         with self.assertRaises(S.Err):
             S.admin_action(s, {"action": "settings", "koSize": 12})
+
+
+    def test_organizer_picks_number_of_rounds(self):
+        rng = random.Random(3)
+        for rounds in (1, 2, 3, 4, 6):
+            for n in (5, 8, 13):
+                with self.subTest(rounds=rounds, players=n):
+                    s = new_tournament(n, rounds=rounds)
+                    play(s, rng)
+                    self.assertEqual(s["phase"], "done")
+                    self.assertGreaterEqual(min(x["played"] for x in S.stats(s).values()), rounds)
+
+    def test_later_rounds_avoid_rematches(self):
+        rng = random.Random(9)
+        s = new_tournament(16, rounds=4)
+        seen = set()
+        for r in range(1, 5):
+            self.assertEqual(s["phase"], f"r{r}")
+            for m in s[f"r{r}"]:
+                k = tuple(sorted((m["a"], m["b"])))
+                self.assertNotIn(k, seen, f"rematch in round {r}")
+                seen.add(k)
+            for m in s[f"r{r}"]:
+                S.set_score(s, f"r{r}", m["id"], None, None, True, *( (11, rng.randint(0, 9)) if rng.random() < .5 else (rng.randint(0, 9), 11) ))
+        self.assertNotEqual(s["phase"], "r4")
+
+    def test_group_format(self):
+        rng = random.Random(21)
+        for n, size, adv in [(6, 3, 2), (9, 3, 2), (12, 4, 2), (13, 4, 1), (20, 4, 2), (20, 5, 2), (26, 4, 2), (40, 5, 2), (64, 4, 2)]:
+            with self.subTest(players=n, size=size, adv=adv):
+                s = new_tournament(n, format="groups", groupSize=size, groupAdvance=adv)
+                self.assertEqual(s["phase"], "groups")
+                sizes = [len(g["ids"]) for g in s["groups"]]
+                self.assertEqual(sum(sizes), n)
+                self.assertLessEqual(max(sizes) - min(sizes), 1, "balanced groups")
+                for g in s["groups"]:
+                    self.assertEqual(len([m for m in s["gm"] if m["g"] == g["id"]]), len(g["ids"]) * (len(g["ids"]) - 1) // 2)
+                K0 = S.ko_size(s)
+                play(s, rng)
+                self.assertEqual(s["phase"], "done")
+                self.assertEqual(len({i for m in s["ko"]["rounds"][0] for i in (m["a"], m["b"])}), K0, "full bracket")
+                grp = {i: g["id"] for g in s["groups"] for i in g["ids"]}
+                clashes = [m for m in s["ko"]["rounds"][0] if grp[m["a"]] == grp[m["b"]]]
+                self.assertLessEqual(len(clashes), 1, "same-group pairs in the first round are avoided")
+                for r in S.ranking(s):
+                    self.assertEqual(r["played"], len(next(g for g in s["groups"] if g["id"] == r["group"])["ids"]) - 1)
+
+    def test_group_late_player_and_locked_settings(self):
+        s = new_tournament(11, format="groups", groupSize=4, groupAdvance=2)
+        before, small = len(s["gm"]), min(len(g["ids"]) for g in s["groups"])
+        S.admin_action(s, {"action": "late", "name": "Late Player"})
+        self.assertEqual(len(s["gm"]), before + small)
+        play(s, random.Random(2))
+        self.assertEqual(s["phase"], "done")
+        with self.assertRaises(S.Err):
+            S.admin_action(s, {"action": "settings", "format": "rounds"})
+        with self.assertRaises(S.Err):
+            S.admin_action(s, {"action": "settings", "rounds": 3})
 
 
 if __name__ == "__main__":

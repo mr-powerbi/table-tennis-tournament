@@ -30,8 +30,9 @@ def now():
 
 def new_state():
     return {"title": DEFAULT_TITLE, "edition": "Edycja 2026", "prize": "", "setsToWin": 1, "scoreMode": "points",
+            "rounds": 2, "format": "rounds", "groupSize": 4, "groupAdvance": 2, "groups": [], "gm": [],
             "koSize": None, "llSpots": None, "deadline": None, "phase": "signup", "players": [],
-            "r1": [], "r2": [], "ll": [], "llDirect": [], "sel": None, "ko": None, "rev": 0, "updated": now()}
+            "r1": [], "r2": [], "r3": [], "r4": [], "r5": [], "r6": [], "ll": [], "llDirect": [], "sel": None, "ko": None, "rev": 0, "updated": now()}
 
 
 def load():
@@ -93,25 +94,44 @@ def mid():
     return secrets.token_hex(4)
 
 
-def pair(ids, rng, everyone, pool=None):
-    ids = list(ids)
-    rng.shuffle(ids)
-    out = []
-    while len(ids) >= 2:
-        out.append({"id": mid(), "a": ids.pop(), "b": ids.pop(), "sa": None, "sb": None, "half": False, "pool": pool})
-    if ids:
-        x = ids.pop()
-        others = [p for p in everyone if p != x]
-        if others:
-            opp = rng.choice(others)
-            out.append({"id": mid(), "a": x, "b": opp, "sa": None, "sb": None, "half": True, "pool": pool})
-    return out
+# the random-opponent rounds r1..r6 (the organizer picks how many are played, default 2)
+ROUND_KEYS = ("r1", "r2", "r3", "r4", "r5", "r6")
+
+
+def all_round_matches(s):
+    return [m for k in ROUND_KEYS for m in s.get(k, [])]
+
+
+def pair(ids, rng, everyone, pool=None, played=None):
+    def pk(a, b):
+        return (a, b) if a < b else (b, a)
+
+    best, best_score = None, float("inf")
+    for _ in range(60 if played else 1):
+        if best_score <= 0:
+            break
+        xs = list(ids)
+        rng.shuffle(xs)
+        out = []
+        while len(xs) >= 2:
+            out.append({"id": mid(), "a": xs.pop(), "b": xs.pop(), "sa": None, "sb": None, "half": False, "pool": pool})
+        if xs:
+            x = xs.pop()
+            others = [p for p in everyone if p != x]
+            fresh = [o for o in others if pk(x, o) not in played] if played else others
+            if others:
+                opp = rng.choice(fresh or others)
+                out.append({"id": mid(), "a": x, "b": opp, "sa": None, "sb": None, "half": True, "pool": pool})
+        score = sum(1 for m in out if played and pk(m["a"], m["b"]) in played)
+        if score < best_score:
+            best, best_score = out, score
+    return best
 
 
 def stats(s):
     T = s["setsToWin"]
     st = {p["id"]: {"w": 0, "l": 0, "sw": 0, "sl": 0, "pw": 0, "pl": 0, "played": 0} for p in s["players"]}
-    for m in s["r1"] + s["r2"]:
+    for m in all_round_matches(s) + s.get("gm", []):
         if not (m["a"] and m["b"] and valid(m["sa"], m["sb"], T)):
             continue
         pa, pb = m.get("pa") or 0, m.get("pb") or 0
@@ -139,7 +159,121 @@ def key(x):
     return (x["w"], x["sw"] - x["sl"], x["pw"] - x["pl"], x["pw"], x["sw"])
 
 
+# ---------- group format: round-robin groups instead of rounds ----------
+
+def group_sizes(n, size):
+    g = max(1, int(n / size + 0.5))
+    base, extra = divmod(n, g)
+    return [base + (1 if i < extra else 0) for i in range(g)]
+
+
+def make_groups(ids, size):
+    order = list(ids)
+    random.Random().shuffle(order)
+    out, pos = [], 0
+    for i, n in enumerate(group_sizes(len(order), size)):
+        out.append({"id": chr(65 + i), "ids": order[pos:pos + n]})
+        pos += n
+    return out
+
+
+def round_robin(ids):
+    """Circle method: every player plays everyone in the group once, in rounds."""
+    xs = list(ids)
+    if len(xs) % 2:
+        xs.append(None)
+    n = len(xs)
+    rounds = []
+    for _ in range(n - 1):
+        ps = []
+        for i in range(n // 2):
+            a, b = xs[i], xs[n - 1 - i]
+            if a and b:
+                ps.append((a, b))
+        rounds.append(ps)
+        xs.insert(1, xs.pop())
+    return rounds
+
+
+def group_matches(groups):
+    out = []
+    for g in groups:
+        for r, ps in enumerate(round_robin(g["ids"])):
+            for a, b in ps:
+                out.append({"id": mid(), "a": a, "b": b, "sa": None, "sb": None, "pa": None, "pb": None,
+                            "sets": None, "half": False, "g": g["id"], "rd": r + 1})
+    out.sort(key=lambda m: (m["rd"], m["g"]))
+    return out
+
+
+def group_direct(s):
+    """Players who go straight to the bracket from their group (top groupAdvance of every group)."""
+    adv = s.get("groupAdvance") or 2
+    groups = s.get("groups") or []
+    sizes = [len(g["ids"]) for g in groups] if groups else group_sizes(len(s["players"]), s.get("groupSize") or 4)
+    return sum(min(adv, z) for z in sizes)
+
+
+def group_tables(s):
+    st = stats(s)
+    names = {p["id"]: p["name"] for p in s["players"]}
+    out = []
+    for g in s.get("groups") or []:
+        ms = [m for m in s.get("gm", []) if m["g"] == g["id"]]
+        ids = sorted(g["ids"], key=lambda i: tuple(-v for v in key(st[i])) + (names[i].lower(),))
+        rows = [dict(id=i, name=names[i], rank=n + 1, **st[i]) for n, i in enumerate(ids)]
+        done = bool(ms) and all(m["a"] and m["b"] and valid(m["sa"], m["sb"], s["setsToWin"]) for m in ms)
+        out.append({"id": g["id"], "done": done, "rows": rows})
+    return out
+
+
+def group_ranking(s):
+    """Cross-group order: group qualifiers first (group position, then per-match averages so that groups of
+    different size are comparable), then everyone else the same way."""
+    adv = s.get("groupAdvance") or 2
+
+    def avg(r):
+        n = max(1, r["played"])
+        return (r["w"] / n, (r["sw"] - r["sl"]) / n, (r["pw"] - r["pl"]) / n, r["pw"] / n)
+
+    rows = []
+    for g in group_tables(s):
+        for r in g["rows"]:
+            o = dict(r, group=g["id"], grank=r["rank"])
+            del o["rank"]
+            rows.append(o)
+
+    def sk(r):
+        return (r["grank"],) + tuple(-v for v in avg(r)) + (r["name"].lower(),)
+
+    return sorted((r for r in rows if r["grank"] <= adv), key=sk) + sorted((r for r in rows if r["grank"] > adv), key=sk)
+
+
+def avoid_group_clashes(s, ordered):
+    """First-round bracket pairs (seed i vs seed K-1-i) should not be two players from the same group."""
+    if s.get("format") != "groups":
+        return ordered
+    grp = {i: g["id"] for g in s.get("groups") or [] for i in g["ids"]}
+    K = len(ordered)
+    out = list(ordered)
+    half = K // 2
+    for i in range(half):
+        ib = K - 1 - i
+        if not grp.get(out[i]) or grp.get(out[i]) != grp.get(out[ib]):
+            continue
+        for j in range(half):
+            if j == i:
+                continue
+            jb = K - 1 - j
+            if grp.get(out[i]) != grp.get(out[jb]) and grp.get(out[j]) != grp.get(out[ib]):
+                out[ib], out[jb] = out[jb], out[ib]
+                break
+    return out
+
+
 def ranking(s):
+    if s.get("format") == "groups":
+        return group_ranking(s)
     st = stats(s)
     names = {p["id"]: p["name"] for p in s["players"]}
     ids = sorted(st, key=lambda i: tuple(-v for v in key(st[i])) + (names[i].lower(),))
@@ -162,7 +296,15 @@ def default_k(n):
 
 def ko_size(s):
     n = len(s["players"])
-    k = s.get("koSize") or default_k(n)
+    k = s.get("koSize")
+    if not k:
+        if s.get("format") == "groups":
+            k = 2
+            d = group_direct(s)
+            while k < d:
+                k *= 2
+        else:
+            k = default_k(n)
     return min(k, pow2_floor(n))
 
 
@@ -184,6 +326,7 @@ def seed_order(n):
 
 
 def build_ko(s, ordered):
+    ordered = avoid_group_clashes(s, ordered)
     K = len(ordered)
     r0 = []
     for i in range(K // 2):
@@ -226,24 +369,47 @@ def all_done(ms, T):
     return all(m["a"] and m["b"] and valid(m["sa"], m["sb"], T) for m in ms)
 
 
-def r1_result(s, pid):
+def wins_so_far(s):
+    """Wins of every player in the rounds played so far (an extra "half" match only counts for its first player)."""
     T = s["setsToWin"]
-    for m in s["r1"]:
-        if m["a"] == pid or (m["b"] == pid and not m["half"]):
-            return winner(m, T) == pid
-    return False
+    w = {p["id"]: 0 for p in s["players"]}
+    for m in all_round_matches(s):
+        win = winner(m, T)
+        if win and (win == m["a"] or not m["half"]):
+            w[win] = w.get(win, 0) + 1
+    return w
+
+
+def next_round(s, k):
+    """Round k >= 2: players with the same number of wins play each other (round 2 = winners vs winners,
+    losers vs losers). From round 3 on, rematches are avoided where possible."""
+    rng = random.Random()
+    ids = [p["id"] for p in s["players"]]
+    w = wins_so_far(s)
+    played = {(m["a"], m["b"]) if m["a"] < m["b"] else (m["b"], m["a"]) for m in all_round_matches(s) if m["a"] and m["b"]}
+    by_wins = {}
+    for i in ids:
+        by_wins.setdefault(w[i], []).append(i)
+    out = []
+    for wins in sorted(by_wins, reverse=True):
+        grp = by_wins[wins]
+        pool = ("win" if wins > 0 else "lose") if k == 2 else f"w{wins}"
+        out += pair(grp, rng, grp if len(grp) > 1 else ids, pool, played if k > 2 else None)
+    return out
 
 
 def advance(s):
     T = s["setsToWin"]
-    if s["phase"] == "r1" and s["r1"] and all_done(s["r1"], T):
-        rng = random.Random()
-        ids = [p["id"] for p in s["players"]]
-        win = [i for i in ids if r1_result(s, i)]
-        lose = [i for i in ids if not r1_result(s, i)]
-        s["r2"] = pair(win, rng, win if len(win) > 1 else ids, "win") + pair(lose, rng, lose if len(lose) > 1 else ids, "lose")
-        s["phase"] = "r2"
-    if s["phase"] == "r2" and all_done(s["r2"], T):
+    R = s.get("rounds") or 2
+    for k in range(1, R + 1):
+        key_ = f"r{k}"
+        if s["phase"] == key_ and s.get(key_) and all_done(s[key_], T):
+            if k < R:
+                s[f"r{k + 1}"] = next_round(s, k + 1)
+                s["phase"] = f"r{k + 1}"
+            else:
+                start_ll(s)
+    if s["phase"] == "groups" and s.get("gm") and all_done(s["gm"], T):
         start_ll(s)
     if s["phase"] == "ll" and all_done(s.get("ll", []), T):
         rank = [r["id"] for r in ranking(s)]
@@ -255,9 +421,14 @@ def ll_plan(s):
     N = len(s["players"])
     K = ko_size(s)
     L = s.get("llSpots")  # None = automatic, 0 = no Lucky Losers
-    if L is None:
-        L = max(1, K // 4)
-    L = max(0, min(L, K, N - K))
+    if s.get("format") == "groups":
+        # the best of the rest go straight in by default; Lucky Losers only fill spots beyond the group qualifiers
+        L = 0 if L is None else L
+        L = max(0, min(L, K - min(group_direct(s), K), N - K))
+    else:
+        if L is None:
+            L = max(1, K // 4)
+        L = max(0, min(L, K, N - K))
     return K, K - L, L
 
 
@@ -276,9 +447,17 @@ def draw(s):
     if len(s["players"]) < 3:
         raise Err("Do losowania potrzeba co najmniej 3 zawodników.")
     ids = [p["id"] for p in s["players"]]
-    s["r1"] = pair(ids, random.Random(), ids)
-    s["r2"], s["sel"], s["ko"], s["ll"], s["llDirect"] = [], None, None, [], []
-    s["phase"] = "r1"
+    for k in ROUND_KEYS:
+        s[k] = []
+    s["sel"], s["ko"], s["ll"], s["llDirect"] = None, None, [], []
+    if s.get("format") == "groups":
+        s["groups"] = make_groups(ids, s.get("groupSize") or 4)
+        s["gm"] = group_matches(s["groups"])
+        s["phase"] = "groups"
+    else:
+        s["groups"], s["gm"] = [], []
+        s["r1"] = pair(ids, random.Random(), ids)
+        s["phase"] = "r1"
     advance(s)
 
 
@@ -295,8 +474,10 @@ def check_deadline(s):
 
 
 def find_match(s, stage, m_id):
-    if stage in ("r1", "r2", "ll"):
+    if stage in ROUND_KEYS + ("ll",):
         pool = s.get(stage, [])
+    elif stage == "g":
+        pool = s.get("gm", [])
     elif stage == "ko" and s["ko"]:
         pool = [m for r in s["ko"]["rounds"] for m in r]
     elif stage == "third" and s["ko"] and s["ko"]["third"]:
@@ -309,7 +490,7 @@ def find_match(s, stage, m_id):
     raise Err("Nie znaleziono meczu.")
 
 
-STAGE_PHASE = {"r1": ("r1",), "r2": ("r2",), "ll": ("ll",), "ko": ("ko", "done"), "third": ("ko", "done")}
+STAGE_PHASE = {"r1": ("r1",), "r2": ("r2",), "r3": ("r3",), "r4": ("r4",), "r5": ("r5",), "r6": ("r6",), "g": ("groups",), "ll": ("ll",), "ko": ("ko", "done"), "third": ("ko", "done")}
 
 
 def points_ok(pa, pb):
@@ -375,7 +556,7 @@ def set_score(s, stage, m_id, sa, sb, admin, pa=None, pb=None, sets=None):
         raise Err("Wynik tego meczu jest już wpisany. Poprawić go może organizator.")
     if not admin and clearing:
         raise Err("Brak uprawnień.")
-    if stage in ("r1", "r2", "ll") and s["phase"] not in STAGE_PHASE[stage]:
+    if stage in ROUND_KEYS + ("g", "ll") and s["phase"] not in STAGE_PHASE[stage]:
         old_w = winner(m, T)
         new_w = None if clearing else (m["a"] if sa > sb else m["b"])
         if old_w != new_w:
@@ -452,6 +633,33 @@ def admin_action(s, body):
             s["llSpots"] = v
             if s["phase"] == "ll":
                 start_ll(s)
+        if "rounds" in body:
+            v = int(body["rounds"])
+            if not 1 <= v <= 6:
+                raise Err("Liczba rund może wynosić od 1 do 6.")
+            if s["phase"] != "signup" and v != (s.get("rounds") or 2):
+                raise Err("Liczbę rund można zmienić tylko przed losowaniem.")
+            s["rounds"] = v
+        if "format" in body:
+            if body["format"] not in ("rounds", "groups"):
+                raise Err("Nieznany format turnieju.")
+            if s["phase"] != "signup" and body["format"] != s.get("format", "rounds"):
+                raise Err("Format turnieju można zmienić tylko przed losowaniem.")
+            s["format"] = body["format"]
+        if "groupSize" in body:
+            v = int(body["groupSize"])
+            if not 3 <= v <= 6:
+                raise Err("Grupa może mieć od 3 do 6 graczy.")
+            if s["phase"] != "signup" and v != (s.get("groupSize") or 4):
+                raise Err("Wielkość grup można zmienić tylko przed losowaniem.")
+            s["groupSize"] = v
+        if "groupAdvance" in body:
+            v = int(body["groupAdvance"])
+            if v not in (1, 2):
+                raise Err("Z grupy może awansować 1 lub 2 graczy.")
+            if s["phase"] != "signup" and v != (s.get("groupAdvance") or 2):
+                raise Err("Liczbę awansujących z grupy można zmienić tylko przed losowaniem.")
+            s["groupAdvance"] = v
         if "scoreMode" in body:
             if body["scoreMode"] not in ("points", "sets"):
                 raise Err("Nieznany tryb wpisywania wyników.")
@@ -476,8 +684,8 @@ def admin_action(s, body):
     elif act == "add":
         add_player(s, body.get("name"))
     elif act == "late":
-        if s["phase"] not in ("r1", "r2"):
-            raise Err("Spóźnionego gracza można dopisać w rundzie 1 lub 2.")
+        if s["phase"] not in ("groups",) + ROUND_KEYS:
+            raise Err("Spóźnionego gracza można dopisać w trakcie rund lub grup.")
         others = [p["id"] for p in s["players"]]
         phase = s["phase"]
         s["phase"] = "signup"
@@ -486,28 +694,47 @@ def admin_action(s, body):
         finally:
             s["phase"] = phase
         rng = random.Random()
-        if phase == "r1":
+        if phase == "groups":
+            # the new player joins the smallest group and plays everyone in it
+            g = sorted(s["groups"], key=lambda x: (len(x["ids"]), x["id"]))[0]
+            rd_ = max([m.get("rd", 0) for m in s["gm"] if m["g"] == g["id"]] + [0])
+            for o in g["ids"]:
+                rd_ += 1
+                s["gm"].append({"id": mid(), "a": p["id"], "b": o, "sa": None, "sb": None, "pa": None, "pb": None,
+                                "sets": None, "half": False, "g": g["id"], "rd": rd_})
+            g["ids"].append(p["id"])
+        elif phase == "r1":
             spare = next((m for m in s["r1"] if m["half"] and m["sa"] is None), None)
             if spare:
                 spare["b"], spare["half"] = p["id"], False
             else:
                 s["r1"].append({"id": mid(), "a": p["id"], "b": rng.choice(others), "sa": None, "sb": None, "half": True, "pool": None})
         else:
-            for opp in rng.sample(others, 2):
-                s["r2"].append({"id": mid(), "a": p["id"], "b": opp, "sa": None, "sb": None, "half": True, "pool": "lose"})
+            # joining in round k: k matches against random opponents, counted only for the late player
+            k = int(phase[1:])
+            for opp in rng.sample(others, min(k, len(others))):
+                s[phase].append({"id": mid(), "a": p["id"], "b": opp, "sa": None, "sb": None, "half": True, "pool": "lose" if k == 2 else "w0"})
     elif act == "draw":
         if s["phase"] != "signup":
             raise Err("Losowanie już się odbyło.")
         draw(s)
     elif act == "reopen":
-        s["phase"], s["r1"], s["r2"], s["sel"], s["ko"], s["ll"], s["llDirect"] = "signup", [], [], None, None, [], []
+        s["phase"], s["sel"], s["ko"], s["ll"], s["llDirect"] = "signup", None, None, [], []
+        for k in ROUND_KEYS:
+            s[k] = []
+        s["groups"], s["gm"] = [], []
         s["deadline"] = None
     elif act == "rollback":
         to = body.get("to")
-        if to == "r1" and s["r1"]:
-            s["phase"], s["r2"], s["sel"], s["ko"], s["ll"], s["llDirect"] = "r1", [], None, None, [], []
-        elif to == "r2" and s["r2"]:
-            s["phase"], s["sel"], s["ko"], s["ll"], s["llDirect"] = "r2", None, None, [], []
+        if to in ROUND_KEYS and s.get(to):
+            idx = ROUND_KEYS.index(to)
+            for k in ROUND_KEYS[idx + 1:]:
+                s[k] = []
+            s["phase"], s["sel"], s["ko"], s["ll"], s["llDirect"] = to, None, None, [], []
+            if idx > 0:
+                advance(s)
+        elif to == "groups" and s.get("gm"):
+            s["phase"], s["sel"], s["ko"], s["ll"], s["llDirect"] = "groups", None, None, [], []
             advance(s)
         elif to == "ll" and s.get("ll"):
             s["phase"], s["ko"] = "ll", None
@@ -534,7 +761,7 @@ def admin_action(s, body):
     elif act == "reset":
         keep = body.get("keepPlayers")
         ns = new_state()
-        for k in ("title", "edition", "prize", "setsToWin", "scoreMode", "koSize", "llSpots"):
+        for k in ("title", "edition", "prize", "setsToWin", "scoreMode", "rounds", "format", "groupSize", "groupAdvance", "koSize", "llSpots"):
             ns[k] = s.get(k, ns[k])
         if keep:
             ns["players"] = s["players"]
@@ -569,7 +796,7 @@ def add_player(s, name):
 def public(s, admin=False):
     out = {k: v for k, v in s.items() if k != "players"}
     out["players"] = [{"id": p["id"], "name": p["name"]} for p in s["players"]]
-    rank = ranking(s) if s["r1"] else []
+    rank = ranking(s) if (s["r1"] or s.get("gm")) else []
     out["ranking"] = rank
     K = ko_size(s) if len(s["players"]) >= 2 else 0
     out["K"] = K
@@ -578,6 +805,8 @@ def public(s, admin=False):
     if len(s["players"]) >= 2:
         _, out["D"], out["L"] = ll_plan(s)
     out["tie"] = boundary_tie(s, rank, K) if s["phase"] == "qual" else []
+    out["groupTables"] = group_tables(s) if s.get("format") == "groups" else []
+    out["D0"] = min(group_direct(s), K) if s.get("format") == "groups" and len(s["players"]) >= 2 else 0
     out["admin"] = admin
     out["serverTime"] = now()
     return out

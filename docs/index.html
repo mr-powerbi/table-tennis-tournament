@@ -170,7 +170,13 @@ tr.me td{font-weight:800}
 details.statsbox .stats{margin-bottom:16px}
 .match .ticking{color:var(--coral-deep);font-weight:700}
 .timing{margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:.92rem}
+.f[hidden]{display:none}
+.gcards{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr))}
+.gcard{border:1px solid var(--line);border-radius:var(--r);padding:12px;background:var(--surface);min-width:0}
+.gcard .tablewrap{margin-top:8px}
 .plans{display:grid;gap:8px}
+.plans[hidden]{display:none}
+.morep summary{cursor:pointer;font-weight:700;font-size:.85rem;color:var(--coral);padding:6px 0}
 .planlist{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))}
 .plan{appearance:none;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;border-radius:12px;padding:10px 12px;cursor:pointer;display:grid;gap:3px;text-align:left}
 .plan:hover{border-color:color-mix(in srgb,var(--coral) 50%, var(--line))}
@@ -315,7 +321,15 @@ const ERR_EN={
 'Nie ma takiego zawodnika.':'No such player.',
 'Ktoś już gra pod tym imieniem.':'Someone is already playing under that name.',
 'Zawodnika można usunąć tylko w trakcie zapisów.':'A player can only be removed during sign-ups.',
-'Spóźnionego gracza można dopisać w rundzie 1 lub 2.':'A late player can be added in round 1 or 2.',
+'Spóźnionego gracza można dopisać w trakcie rund lub grup.':'A late player can be added during the rounds or the groups.',
+'Liczba rund może wynosić od 1 do 6.':'The number of rounds can be from 1 to 6.',
+'Liczbę rund można zmienić tylko przed losowaniem.':'The number of rounds can only be changed before the draw.',
+'Nieznany format turnieju.':'Unknown tournament format.',
+'Format turnieju można zmienić tylko przed losowaniem.':'The tournament format can only be changed before the draw.',
+'Grupa może mieć od 3 do 6 graczy.':'A group can have 3 to 6 players.',
+'Wielkość grup można zmienić tylko przed losowaniem.':'The group size can only be changed before the draw.',
+'Z grupy może awansować 1 lub 2 graczy.':'1 or 2 players can advance from a group.',
+'Liczbę awansujących z grupy można zmienić tylko przed losowaniem.':'The number of players advancing from a group can only be changed before the draw.',
 'Losowanie już się odbyło.':'The draw has already happened.',
 'Nie można cofnąć do tego etapu.':'Cannot roll back to that stage.',
 'Nieznana akcja.':'Unknown action.',
@@ -342,7 +356,12 @@ const ERR_EN={
 'Nieznany tryb wpisywania wyników.':'Unknown score entry mode.'};
 const ERR_RE=[[/^Za dużo setów: mecz kończy się, gdy ktoś wygra (\d+) sety\.$/,'Too many sets: the match ends when someone wins $1 sets.'],[/^Mecz nie jest rozstrzygnięty: zwycięzca musi wygrać (\d+) sety\.$/,'The match is not decided: the winner needs $1 sets.'],[/^Mecz gramy do (\d+) wygranych setów\. Sprawdź wynik\.$/,'A match is first to $1 sets. Check the result.'],[/^Wybierz dokładnie (\d+) zawodników\.$/,'Select exactly $1 players.']];
 const te=m=>{ m=String(m||''); if(LANG==='pl') return m; if(ERR_EN[m]) return ERR_EN[m]; for(const [re,t] of ERR_RE) if(re.test(m)) return m.replace(re,t); return m; };
-const stg=k=>({r1:tr('Runda 1','Round 1'),r2:tr('Runda 2','Round 2'),ll:'Lucky Losers',third:tr('O 3. miejsce','3rd place match')})[k];
+const stg=k=>/^r[1-6]$/.test(k)?tr('Runda '+k[1],'Round '+k[1]):({ll:'Lucky Losers',third:tr('O 3. miejsce','3rd place match')})[k];
+const roundN=()=>S.rounds||2;
+const isRoundPhase=p=>/^r[1-6]$/.test(p);
+const roundKeys=()=>Array.from({length:roundN()},(_,i)=>'r'+(i+1));
+const allRounds=()=>roundKeys().flatMap(k=>S[k]||[]);
+const groupsMode=()=>S.format==='groups';
 function applyStatic(){
   document.documentElement.lang=LANG;
   document.title=tr('Turniej Tenisa Stołowego','Table Tennis Tournament');
@@ -393,9 +412,38 @@ function bracketPlans(N){
   });
   return plans.slice(0,8);
 }
-function llOptionsFor(K,N){
-  const auto=autoL(K,N);
-  return [['',tr('Automatycznie','Automatic')+' ('+auto+')'],...Array.from({length:maxL(K,N)+1},(_,v)=>[String(v),v===0?tr('0 (bez Lucky Losers)','0 (no Lucky Losers)'):v+' '+tr('(gra '+(2*v)+' najlepszych spoza awansu)','(the best '+(2*v)+' outside direct qualification play)')])];
+function llOptionsFor(K,N,o={}){
+  const m=o.groups?Math.max(0,Math.min(K-Math.min(o.D0||0,K),N-K,16)):maxL(K,N);
+  return Array.from({length:m+1},(_,v)=>[String(v),v===0?tr('0 (bez Lucky Losers)','0 (no Lucky Losers)'):`${v} ${tr(plural(v,'miejsce','miejsca','miejsc'),'places')} · ${Math.round(100*v/K)}% ${tr('drabinki','of the bracket')} · ${tr(`gra ${2*v} ${plural(2*v,'gracz','graczy','graczy')}`,`${2*v} players play`)}`]);
+}
+// groups: sizes, qualifiers and a bracket size that fits (mirrors the engine)
+const groupSizesFor=(N,size)=>{ const G=Math.max(1,Math.floor(N/size+0.5)), base=Math.floor(N/G), extra=N%G; return Array.from({length:G},(_,g)=>base+(g<extra?1:0)); };
+const groupDirectFor=(N,size,adv)=>groupSizesFor(N,size).reduce((n,z)=>n+Math.min(adv,z),0);
+const autoKGroups=(N,size,adv)=>{ let k=2; const d=groupDirectFor(N,size,adv); while(k<d) k*=2; return Math.min(k,pow2Floor(N)); };
+function groupPlans(N){
+  if(N<4) return [];
+  const seen=new Set(), plans=[];
+  [3,4,5,6].forEach(size=>[2,1].forEach(adv=>{
+    const sizes=groupSizesFor(N,size), G=sizes.length, D0=groupDirectFor(N,size,adv), K=autoKGroups(N,size,adv);
+    const tag=G+':'+adv; if(seen.has(tag)||K<D0||K<2||(G===1&&N>6)||K/N<0.2) return; seen.add(tag);
+    const counts={}; sizes.forEach(z=>counts[z]=(counts[z]||0)+1);
+    plans.push({size,adv,G,D0,K,rest:K-D0,pct:Math.round(100*K/N),layout:Object.keys(counts).map(Number).sort((a,b)=>b-a).map(z=>`${counts[z]}×${z}`).join(' + ')});
+  }));
+  plans.sort((a,b)=>Math.abs(a.K/N-.5)-Math.abs(b.K/N-.5)||b.adv-a.adv||a.G-b.G);
+  return plans.slice(0,6);
+}
+// first three suggestions are visible, the rest is folded away
+function listPlans(btns){
+  const more=btns.slice(3);
+  return `<div class="planlist">${btns.slice(0,3).join('')}</div>${more.length?`<details class="morep"><summary>${tr(`Pokaż więcej propozycji (${more.length})`,`Show more suggestions (${more.length})`)}</summary><div class="planlist" style="margin-top:8px">${more.join('')}</div></details>`:''}`;
+}
+function groupPlanText(p,N){
+  return tr(`${p.G} ${plural(p.G,'grupa','grupy','grup')} (${p.layout} ${plural(p.G,'gracz','graczy','graczy')}) · z grupy awansuje ${p.adv}: ${p.D0} bezpośrednio${p.rest?` + ${p.rest} ${plural(p.rest,'najlepszy','najlepszych','najlepszych')} z reszty`:''} · drabinka na ${p.K} (${p.pct}% graczy)`,
+    `${p.G} ${p.G===1?'group':'groups'} (${p.layout} players) · ${p.adv} advance${p.adv===1?'s':''} from each: ${p.D0} straight in${p.rest?` + ${p.rest} best of the rest`:''} · bracket of ${p.K} (${p.pct}% of players)`);
+}
+function fmtInfoText(fmt,N,R,size,adv){
+  if(fmt==='groups'){ const sizes=groupSizesFor(N,size); return tr(`Podział: ${sizes.length} ${plural(sizes.length,'grupa','grupy','grup')} (${sizes.join(' + ')} graczy), awansuje ${groupDirectFor(N,size,adv)}.`,`Layout: ${sizes.length} ${sizes.length===1?'group':'groups'} (${sizes.join(' + ')} players), ${groupDirectFor(N,size,adv)} advance directly.`); }
+  return tr(`Każdy zagra co najmniej ${R} ${plural(R,'mecz','mecze','meczów')} z losowymi rywalami.`,`Everyone plays at least ${R} ${R===1?'match':'matches'} against random opponents.`);
 }
 function planText(pl,N){
   const places=n=>n===1?'place':'places';
@@ -408,11 +456,13 @@ function randomTournament(){
   for(let i=pool.length-1;i>0;i--){ const j=rnd(0,i); [pool[i],pool[j]]=[pool[j],pool[i]]; }
   TTEngine.freshWithPlayers(pool.slice(0,n));
   const sets=[1,1,1,2,3][rnd(0,4)];
+  const gps=groupPlans(n), grp=gps.length&&Math.random()<.4?gps[rnd(0,gps.length-1)]:null;
   const plans=bracketPlans(n), pl=plans.length?plans[rnd(0,plans.length-1)]:null;
-  const settings={action:'settings',setsToWin:sets,scoreMode:Math.random()<.65?'points':'sets',...(pl?{koSize:pl.K,llSpots:pl.L}:{})};
+  const settings={action:'settings',setsToWin:sets,scoreMode:Math.random()<.65?'points':'sets',
+    ...(grp?{format:'groups',groupSize:grp.size,groupAdvance:grp.adv,koSize:grp.K,llSpots:0}:{format:'rounds',rounds:rnd(1,4),...(pl?{koSize:pl.K,llSpots:pl.L}:{})})};
   try{ TTEngine.request('api/admin',settings); }catch(e){ TTEngine.request('api/admin',{action:'settings',setsToWin:sets}); }
   const st=TTEngine.request('api/admin',{action:'draw'});
-  randomTournament.info={n,sets:st.setsToWin,K:st.K,L:st.L};
+  randomTournament.info={n,sets:st.setsToWin,K:st.K,L:st.L,format:st.format,rounds:st.rounds};
   return st;
 }
 const DEMO_NAMES=['Norbert W.','Olek B.','Igor H.','Grzegorz L.','Szymon','Łukasz D.','Rafał T.','Kamil O.','Piotr Z.','Ewa W.','Kasia L.','Jan K.','Artur G.','Wiktor M.','Bartosz F.','Damian P.','Paweł N.','Robert J.','Ola R.','Hubert S.','Marek Ż.','Konrad E.','Zosia','Patryk B.','Tomek R.','Mateusz C.'];
@@ -444,9 +494,12 @@ const winnerOf=m=>{ if(m.a&&m.b&&valid(m.sa,m.sb)) return m.sa>m.sb?m.a:m.b; ret
 const isMe=id=>!!id&&mine.some(x=>x.id===id);
 const youLbl=()=>mine.length===1?tr(' · ty',' · you'):'';
 
-const PH=['signup','r1','r2','qual','ll','ko','done'];
+const PH=['signup','groups','r1','r2','r3','r4','r5','r6','qual','ll','ko','done'];
 function steps(){
-  const labels=[['signup',tr('Zapisy','Sign-ups')],['r1',tr('Runda 1','Round 1')],['r2',tr('Runda 2','Round 2')],['ll','Lucky Losers'],['ko',tr('Drabinka','Bracket')],['done','Podium']];
+  const labels=[['signup',tr('Zapisy','Sign-ups')]];
+  if(groupsMode()) labels.push(['groups',tr('Grupy','Groups')]); else roundKeys().forEach(k=>labels.push([k,stg(k)]));
+  if(S.L>0||S.phase==='ll') labels.push(['ll','Lucky Losers']);
+  labels.push(['ko',tr('Drabinka','Bracket')],['done','Podium']);
   const cur=PH.indexOf(S.phase);
   $('#steps').innerHTML=labels.map(([k,l])=>{const i=PH.indexOf(k);return `<span class="step ${i===cur?'on':i<cur?'done':''}">${l}</span>`}).join('');
 }
@@ -457,6 +510,7 @@ function header(){
   const n=S.players.length;
   const chips=[`🏓 ${n} ${pn(n,['zawodnik','zawodników','zawodników'],['player','players'])}`,...(T()===1?[tr('Mecz: 1 set do 11 punktów','Match: 1 set to 11 points')]:[tr(`Mecz do ${T()} wygranych setów`,`Match: first to ${T()} sets`),tr('Set do 11 punktów','Set to 11 points')])];
   if(n>=3) chips.push(tr(`Drabinka: ${S.K} ${plural(S.K,'miejsce','miejsca','miejsc')}`,`Bracket: ${S.K} ${S.K===1?'place':'places'}`));
+  if(n>=3) chips.push(groupsMode()?tr(`Grupy po ok. ${S.groupSize||4}`,`Groups of about ${S.groupSize||4}`):tr(`${roundN()} ${plural(roundN(),'runda','rundy','rund')}`,`${roundN()} ${roundN()===1?'round':'rounds'}`));
   if(S.phase==='signup'&&S.deadline) chips.push(tr(`Zapisy do ${fmtDate(S.deadline)}`,`Sign-ups until ${fmtDate(S.deadline)}`));
   $('#meta').innerHTML=chips.map(c=>`<span class="chip">${esc(c)}</span>`).join('');
 }
@@ -465,25 +519,30 @@ function fmtDate(iso){try{return new Date(iso).toLocaleString(LOC(),{weekday:'sh
 
 function render(){
   header(); steps();
-  const out=[];
+  const out=[], ph=S.phase, post=['ko','done'].includes(ph), R=roundN(), roundPh=isRoundPhase(ph), gm=groupsMode();
   if(S.demo) out.push(demoBar());
-  if(S.phase==='done') out.push(podium());
-  if(S.phase==='signup') out.push(signup());
-  if(['ko','done'].includes(S.phase)) out.push(bracket(), statsSec());
-  if(S.phase==='qual') out.push(tableSec());
-  if(S.phase==='ll') out.push(llSec());
-  if(S.phase==='r2') out.push(qualBox());
-  if(S.phase==='r2') out.push(roundSec('r2'));
-  if(S.phase==='ll') out.push(roundSec('r2'));
-  if(['r1','r2','qual','ll'].includes(S.phase)) out.push(roundSec('r1'));
-  if(['r1','r2','ll'].includes(S.phase) && S.ranking.length) out.push(tableSec());
-  if(['ko','done'].includes(S.phase)) out.push(`<details class="how"><summary>${tr('Kwalifikacje: rundy 1–2 i Lucky Losers','Qualifying: rounds 1–2 and Lucky Losers')}</summary>${S.ll&&S.ll.length?llSec(true):''}${roundSec('r1',true)}${S.r2.length?roundSec('r2',true):''}</details>`);
-  if(['ko','done'].includes(S.phase)) out.push(tableSec());
+  if(ph==='done') out.push(podium());
+  if(ph==='signup') out.push(signup());
+  if(post) out.push(bracket(), statsSec());
+  if(ph==='qual') out.push(tableSec());
+  if(ph==='ll') out.push(llSec());
+  if(gm){
+    if(ph==='groups'||ph==='ll') out.push(groupsSec());
+    if((ph==='groups'||ph==='ll')&&S.ranking.length) out.push(tableSec());
+    if(post) out.push(`<details class="how"><summary>${tr('Kwalifikacje: grupy i Lucky Losers','Qualifying: groups and Lucky Losers')}</summary>${S.ll&&S.ll.length?llSec(true):''}${groupsSec(true)}</details>`);
+  } else {
+    const k=roundPh?+ph[1]:(ph==='ll'||ph==='qual'?R:0);
+    if(roundPh&&k===R&&R>=2) out.push(qualBox());
+    for(let j=k;j>=1;j--) if((S['r'+j]||[]).length) out.push(roundSec('r'+j));
+    if((roundPh||ph==='ll')&&S.ranking.length) out.push(tableSec());
+    if(post) out.push(`<details class="how"><summary>${tr(`Kwalifikacje: ${R>1?'rundy 1–'+R:'runda 1'} i Lucky Losers`,`Qualifying: ${R>1?'rounds 1–'+R:'round 1'} and Lucky Losers`)}</summary>${S.ll&&S.ll.length?llSec(true):''}${roundKeys().filter(q=>(S[q]||[]).length).map(q=>roundSec(q,true)).join('')}</details>`);
+  }
+  if(post) out.push(tableSec());
   out.push(allResults());
-  if(!['ko','done'].includes(S.phase)) out.push(statsSec());
+  if(!post) out.push(statsSec());
   out.push(howto());
   $('#admopen').hidden=!S.admin;
-  $('#infobtn').hidden=S.phase==='signup';
+  $('#infobtn').hidden=ph==='signup';
   const ad=$('#adm');
   if(!S.admin){ if(ad.open) ad.close(); $('#admbody').innerHTML=''; }
   else if(!(ad.open&&ad.contains(document.activeElement))) $('#admbody').innerHTML=adminPanel();
@@ -492,7 +551,7 @@ function render(){
 }
 
 function demoBar(){
-  const canSim=['r1','r2','ll','ko'].includes(S.phase);
+  const canSim=['groups','ll','ko'].includes(S.phase)||isRoundPhase(S.phase);
   return `<section class="demo"><div>${tr('<b>Wersja demo.</b> Aplikacja działa w Twojej przeglądarce, a Ty jesteś organizatorem: możesz wpisywać wyniki, cofać rundy i zaczynać od nowa. Przykładowy turniej to prawdziwy przebieg rozgrywek firmowych ze zmienionymi imionami.','<b>Demo version.</b> The app runs in your browser and you are the organizer: you can enter results, roll back rounds and start over. The sample tournament is a real company tournament with changed names.')}</div>
     <div class="actions">
       ${canSim?`<button class="btn small" data-demo="sim">${tr(`Rozegraj losowo ${S.phase==='ko'?'rundę drabinki':'bieżący etap'}`,`Play ${S.phase==='ko'?'the bracket round':'the current stage'} at random`)}</button>`:''}
@@ -503,13 +562,18 @@ function demoBar(){
 }
 
 function howto(){
-  const prize=S.prize?esc(tx(S.prize)):'';
+  const prize=S.prize?esc(tx(S.prize)):'', R=roundN(), gsz=S.groupSize||4, adv=S.groupAdvance||2;
+  const qual=groupsMode()
+    ?tr(`<b>Grupy.</b> Gracze są losowani do grup po ok. ${gsz} osoby, a w grupie każdy gra z każdym. Z każdej grupy awansuje ${adv} ${plural(adv,'gracz','graczy','graczy')}.`,`<b>Groups.</b> Players are drawn into groups of about ${gsz} and everyone plays everyone in their group. ${adv} ${adv===1?'player':'players'} from each group advance.`)
+    :tr(`<b>Rundy.</b> Losowanie par, a w kolejnych rundach grają ze sobą gracze o takim samym bilansie wygranych (runda 2: wygrani z wygranymi, przegrani z przegranymi). Rund jest ${R}, więc każdy zagra co najmniej ${R} ${plural(R,'mecz','mecze','meczów')}.`,`<b>Rounds.</b> Pairs are drawn, and in later rounds players with the same record play each other (round 2: winners vs winners, losers vs losers). There ${R===1?'is':'are'} ${R} ${R===1?'round':'rounds'}, so everyone plays at least ${R} ${R===1?'match':'matches'}.`);
+  const rank=groupsMode()
+    ?tr('<b>Awans.</b> W grupie liczą się zwycięstwa, potem bilans setów lub punktów. Brakujące miejsca w drabince zajmują najlepsi z reszty, porównywani średnimi z meczu, bo grupy mogą mieć różną wielkość.','<b>Qualification.</b> In a group: wins first, then set or point difference. Missing bracket places go to the best of the rest, compared by per-match averages because groups can differ in size.')
+    :tr('<b>Awans.</b> Ranking: liczba zwycięstw, potem bilans punktów, potem zdobyte punkty. Czołówka wchodzi do drabinki bezpośrednio.','<b>Qualification.</b> Ranking: number of wins, then point difference, then points scored. The top players go straight into the bracket.');
   return `<details class="how" id="howto" ${S.phase==='signup'?'open':''}><summary>${tr('Jak to działa','How it works')}</summary><ol>
   <li>${tr('<b>Zapisy.</b> Każdy, kto ma ten link, dopisuje siebie albo inne osoby, każdą osobno.','<b>Sign-ups.</b> Anyone with this link adds themselves or other people, one at a time.')}</li>
-  <li>${tr('<b>Runda 1.</b> Losowanie par, wszyscy grają po jednym meczu.','<b>Round 1.</b> Pairs are drawn and everyone plays one match.')}</li>
-  <li>${tr('<b>Runda 2.</b> Wygrani grają z wygranymi, przegrani z przegranymi. Każdy ma za sobą co najmniej dwa mecze.','<b>Round 2.</b> Winners play winners, losers play losers. Everyone has played at least two matches.')}</li>
-  <li>${tr('<b>Awans.</b> Ranking: liczba zwycięstw, potem bilans punktów, potem zdobyte punkty. Czołówka wchodzi do drabinki bezpośrednio.','<b>Qualification.</b> Ranking: number of wins, then point difference, then points scored. The top players go straight into the bracket.')}</li>
-  <li>${tr('<b>Lucky Losers.</b> Najlepsi spoza bezpośredniego awansu grają między sobą jeden mecz, zwycięzcy uzupełniają drabinkę. Reszta kończy udział.','<b>Lucky Losers.</b> The best players outside direct qualification play each other once; the winners fill up the bracket. The rest are out.')}</li>
+  <li>${qual}</li>
+  <li>${rank}</li>
+  <li>${tr('<b>Lucky Losers</b> (opcjonalnie). Najlepsi spoza bezpośredniego awansu grają między sobą jeden mecz, zwycięzcy uzupełniają drabinkę. Reszta kończy udział.','<b>Lucky Losers</b> (optional). The best players outside direct qualification play each other once; the winners fill up the bracket. The rest are out.')}</li>
   <li>${tr(`<b>Drabinka.</b> Puchar do końca, z meczem o 3. miejsce. ${S.prize?`Zwycięzca odbiera nagrodę: ${prize}.`:'Zwycięzca zgarnia chwałę.'}`,`<b>Bracket.</b> Knockout to the end, with a 3rd place match. ${S.prize?`The winner takes the prize: ${prize}.`:'The winner takes the glory.'}`)}</li>
   <li>${tr('<b>Wyniki</b> po meczu zgłaszacie organizatorowi, on je wpisuje. Strona odświeża się sama.','<b>Results.</b> After a match, tell the organizer and they enter it. The page refreshes by itself.')}</li></ol></details>`;
 }
@@ -547,7 +611,7 @@ function matchBtn(m,stage,opts={}){
 function qualBox(){
   const R=S.ranking, K=S.K; if(!R.length) return '';
   const rem={}; R.forEach(r=>rem[r.id]=0);
-  for(const m of [...S.r1,...S.r2]){ if(!m.a||!m.b||valid(m.sa,m.sb)) continue; rem[m.a]=(rem[m.a]||0)+1; if(!m.half) rem[m.b]=(rem[m.b]||0)+1; }
+  for(const m of allRounds()){ if(!m.a||!m.b||valid(m.sa,m.sb)) continue; rem[m.a]=(rem[m.a]||0)+1; if(!m.half) rem[m.b]=(rem[m.b]||0)+1; }
   const maxW=r=>r.w+(rem[r.id]||0);
   const D=S.D??K, LL=S.L??0;
   const sure=D?R.filter(x=>R.filter(o=>o.id!==x.id&&maxW(o)>=x.w).length<D && x.w>0):[];
@@ -563,6 +627,21 @@ function qualBox(){
     ${sure.length?`<ul class="qlist" style="margin-top:8px">${li(sure)}</ul>`:`<p class="sub" style="margin:6px 0 0">${tr('Jeszcze nikt nie ma pewnego awansu.','Nobody has secured a place yet.')}</p>`}</div>
     ${maybe.length?`<div><div class="qlbl">${tr(`Teraz na miejscach bezpośredniego awansu, jeszcze się waży (${maybe.length})`,`Currently in the direct qualification spots, still undecided (${maybe.length})`)}</div><ul class="qlist maybe" style="margin-top:8px">${li(maybe)}</ul></div>`:''}
   </section>`;
+}
+
+function groupsSec(compact){
+  const gt=S.groupTables||[]; if(!gt.length) return '';
+  const adv=S.groupAdvance||2, nd=(S.gm||[]).filter(m=>valid(m.sa,m.sb)).length;
+  const cards=gt.map(g=>{
+    const ms=(S.gm||[]).filter(m=>m.g===g.id);
+    const rows=g.rows.map((r,i)=>{ const diff=T()===1?r.pw-r.pl:r.sw-r.sl;
+      return `<tr class="${i===adv-1?'cut':''} ${r.rank<=adv?'in':''} ${isMe(r.id)?'me':''}"><td class="num">${r.rank}</td><td>${esc(r.name)}${isMe(r.id)?youLbl():''}</td><td class="num">${r.played}</td><td class="num">${r.w}</td><td class="num">${T()===1?`${r.pw}:${r.pl}`:`${r.sw}:${r.sl}`}</td><td class="num">${diff>0?'+':''}${diff}</td></tr>`; }).join('');
+    const dn=ms.filter(m=>valid(m.sa,m.sb)).length;
+    return `<div class="gcard"><div class="poolhead"><span class="tag">${tr('Grupa','Group')} ${g.id}</span>${g.done?tr('zakończona','finished'):`${dn}/${ms.length} ${tr('meczów','matches')}`}</div>
+      <div class="tablewrap"><table><thead><tr><th class="num">#</th><th>${tr('Zawodnik','Player')}</th><th class="num">${tr('M','P')}</th><th class="num">${tr('Z','W')}</th><th class="num">${T()===1?tr('Punkty','Points'):tr('Sety','Sets')}</th><th class="num">+/−</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="mlist" style="margin-top:10px">${ms.map(m=>matchBtn(m,'g')).join('')}</div></div>`; }).join('');
+  const body=`<div class="sechead"><div><h2>${tr('Faza grupowa','Group stage')}</h2><p class="sub">${tr(`W grupie każdy gra z każdym. Z każdej grupy awansuje ${adv} ${plural(adv,'gracz','graczy','graczy')} (przerywana linia). Pozostałe miejsca w drabince zajmują najlepsi z reszty, patrz tabela poniżej.`,`Everyone plays everyone in their group. ${adv} ${adv===1?'player':'players'} from each group advance (dashed line). The remaining bracket places go to the best of the rest, see the table below.`)}</p></div><span class="chip mono">${nd}/${(S.gm||[]).length} ${tr('meczów','matches')}</span></div><div class="gcards">${cards}</div>`;
+  return compact?`<div style="margin-block:12px 20px">${body}</div>`:`<section>${body}</section>`;
 }
 
 function llSec(compact){
@@ -581,7 +660,7 @@ function fmtClock(iso){ try{ return new Date(iso).toLocaleTimeString(LOC(),{hour
 function statsSec(){
   const all=[];
   const add=(ms,l)=>(ms||[]).forEach(m=>{ if(m.a&&m.b&&valid(m.sa,m.sb)) all.push([l,m]); });
-  add(S.r1,stg('r1')); add(S.r2,stg('r2')); add(S.ll,stg('ll'));
+  roundKeys().forEach(k=>add(S[k],stg(k))); (S.groups||[]).forEach(g=>add((S.gm||[]).filter(m=>m.g===g.id),tr('Grupa ','Group ')+g.id)); add(S.ll,stg('ll'));
   if(S.ko){ S.ko.rounds.forEach(r=>add(r,roundName(r.length,true))); if(S.ko.third) add([S.ko.third],stg('third')); }
   const multi=T()>1;
   // point units: the whole match (single set) or every set separately (multi-set matches)
@@ -667,7 +746,7 @@ function statsSec(){
 function allResults(){
   const rows=[];
   const add=(ms,label)=>(ms||[]).forEach(m=>{ if(m.a&&m.b&&valid(m.sa,m.sb)) rows.push([label,m]); });
-  add(S.r1,stg('r1')); add(S.r2,stg('r2')); add(S.ll,stg('ll'));
+  roundKeys().forEach(k=>add(S[k],stg(k))); (S.groups||[]).forEach(g=>add((S.gm||[]).filter(m=>m.g===g.id),tr('Grupa ','Group ')+g.id)); add(S.ll,stg('ll'));
   if(S.ko){ S.ko.rounds.forEach(r=>add(r,roundName(r.length,true))); if(S.ko.third) add([S.ko.third],stg('third')); }
   const sc=(m,side)=>T()===1&&m.pa!=null?(side==='a'?m.pa:m.pb):(side==='a'?m.sa:m.sb);
   const body=rows.length?rows.map(([l,m])=>{const w=winnerOf(m);return `<tr><td>${l}${m.half?` <span class="n" title="${tr('Mecz uzupełniający','Extra match')}">*</span>`:''}</td>
@@ -679,13 +758,19 @@ function allResults(){
 
 function roundSec(stage,compact){
   const ms=S[stage]; if(!ms||!ms.length) return '';
-  const done=ms.filter(m=>valid(m.sa,m.sb)).length;
-  const head=`<div class="sechead"><div><h2>${stg(stage)}</h2><p class="sub">${stage==='r1'?tr('Wszyscy grają po jednym meczu, pary z losowania.','Everyone plays one match, pairs drawn at random.'):tr('Wygrani z rundy 1 grają z wygranymi, przegrani z przegranymi. Po tej rundzie każdy ma dwa mecze.','Round 1 winners play winners, losers play losers. After this round everyone has played two matches.')}</p></div><span class="chip mono">${done}/${ms.length} ${tr('meczów','matches')}</span></div>`;
+  const k=+stage[1], done=ms.filter(m=>valid(m.sa,m.sb)).length;
+  const sub=k===1?tr('Wszyscy grają po jednym meczu, pary z losowania.','Everyone plays one match, pairs drawn at random.')
+    :k===2?tr('Wygrani z rundy 1 grają z wygranymi, przegrani z przegranymi. Po tej rundzie każdy ma dwa mecze.','Round 1 winners play winners, losers play losers. After this round everyone has played two matches.')
+    :tr(`Gracze z takim samym bilansem grają ze sobą, bez rewanżów, gdy się da. Po tej rundzie każdy ma za sobą ${k} ${plural(k,'mecz','mecze','meczów')}.`,`Players with the same record play each other, avoiding rematches where possible. After this round everyone has played ${k} matches.`);
+  const head=`<div class="sechead"><div><h2>${stg(stage)}</h2><p class="sub">${sub}</p></div><span class="chip mono">${done}/${ms.length} ${tr('meczów','matches')}</span></div>`;
   let body;
-  if(stage==='r2'){
-    const pools=[['win',tr('Wygrani z rundy 1','Round 1 winners'),''],['lose',tr('Przegrani z rundy 1','Round 1 losers'),'']].map(([k,l,c])=>{const xs=ms.filter(m=>m.pool===k); if(!xs.length) return '';
-      return `<div><div class="poolhead"><span class="tag ${c}">${k==='win'?'1–0':'0–1'}</span>${l}</div><div class="mlist">${xs.map(m=>matchBtn(m,stage)).join('')}</div></div>`}).join('');
-    body=`<div class="pools">${pools}</div>`;
+  if(k>=2){
+    // one block per record: pool 'win'/'lose' (round 2) or 'wN' = N wins before this round
+    const winsOf=p=>p==='win'?1:p==='lose'?0:+String(p||'w0').slice(1);
+    const pools=[...new Set(ms.map(m=>m.pool||'w0'))].sort((a,b)=>winsOf(b)-winsOf(a));
+    const label=p=>k===2?(p==='win'?tr('Wygrani z rundy 1','Round 1 winners'):tr('Przegrani z rundy 1','Round 1 losers')):tr(`Bilans ${winsOf(p)}–${k-1-winsOf(p)}`,`Record ${winsOf(p)}–${k-1-winsOf(p)}`);
+    body=`<div class="pools">${pools.map(p=>{ const xs=ms.filter(m=>(m.pool||'w0')===p);
+      return `<div><div class="poolhead"><span class="tag">${winsOf(p)}–${k-1-winsOf(p)}</span>${label(p)}</div><div class="mlist">${xs.map(m=>matchBtn(m,stage)).join('')}</div></div>`}).join('')}</div>`;
   } else body=`<div class="pools"><div class="mlist">${ms.slice(0,Math.ceil(ms.length/2)).map(m=>matchBtn(m,stage)).join('')}</div><div class="mlist">${ms.slice(Math.ceil(ms.length/2)).map(m=>matchBtn(m,stage)).join('')}</div></div>`;
   return compact?`<div style="margin-block:12px 20px">${head}${body}</div>`:`<section>${head}${body}</section>`;
 }
@@ -699,7 +784,7 @@ function tableSec(){
   const K=S.K, tie=new Set(S.tie||[]), sel=new Set(S.sel||[]);
   const D=S.D??K, LL=S.L??0;
   const idx={}; R.forEach((r,i)=>idx[r.id]=i);
-  const info={}; R.forEach(r=>info[r.id]={lvl:0,lbl:['r1','r2'].includes(S.phase)?tr('Kwalifikacje','Qualifying'):stg('r2')});
+  const info={}; R.forEach(r=>info[r.id]={lvl:0,lbl:(isRoundPhase(S.phase)||S.phase==='groups')?tr('Kwalifikacje','Qualifying'):(groupsMode()?tr('Faza grupowa','Group stage'):stg('r'+roundN()))});
   const llDone=(S.ll||[]).filter(m=>valid(m.sa,m.sb));
   (S.ll||[]).forEach(m=>{[m.a,m.b].forEach(id=>{if(info[id]){info[id].lvl=5;info[id].lbl='Lucky Losers';}});});
   (S.llDirect||[]).forEach(id=>{if(info[id]){info[id].lvl=6;info[id].lbl=tr('Awans bezpośredni','Direct qualification');}});
@@ -727,6 +812,7 @@ function tableSec(){
       const m=llM(id); if(m){ if(valid(m.sa,m.sb)) return ['out',tr('Odpadł(a) w Lucky Losers','Out in Lucky Losers')]; return ['ll',tr('Gra w Lucky Losers','Playing Lucky Losers')]; }
       return ['out',tr('Poza drabinką','Out of the bracket')];
     }
+    if(groupsMode()&&i<D) return ['in',i<(S.D0||0)?tr('Awans z grupy','Qualified from the group'):tr('Awans (najlepsi z reszty)','Qualified (best of the rest)')];
     return i<D?['in',tr('Awans bezpośredni','Direct qualification')]:i<D+2*LL?['ll','Lucky Losers']:['out',tr('Poza drabinką','Out of the bracket')];
   };
   const rows=post&&!rankView?[...R].sort((a,b)=>info[b.id].lvl-info[a.id].lvl||idx[a.id]-idx[b.id]):R;
@@ -735,15 +821,15 @@ function tableSec(){
     const st=(showStatus?status(r.id,i):null);
     const cls=[st&&st[0]==='out'?'out':'', zones&&(i===D-1||(LL&&i===D+2*LL-1))?'cut':'', inK?'in':'', zones&&i>=D&&i<D+2*LL?'llz':'', tie.has(r.id)?'tie':'', isMe(r.id)?'me':''].join(' ');
     const diff=T()===1?r.pw-r.pl:r.sw-r.sl;
-    return `<tr class="${cls}"><td class="num">${i+1}</td><td>${esc(r.name)}${isMe(r.id)?youLbl():''}</td>${showStage?`<td>${info[r.id].lbl}</td>`:''}${showStatus?`<td><span class="stt st-${st[0]}">${st[1]}</span></td>`:''}<td class="num">${r.played}</td><td class="num">${r.w}</td><td class="num">${T()===1?`${r.pw}:${r.pl}`:`${r.sw}:${r.sl}`}</td><td class="num">${diff>0?'+':''}${diff}</td>${qual&&S.admin?`<td><input type="checkbox" aria-label="${tr('Awans','Qualifies')}: ${esc(r.name)}" data-sel="${r.id}" ${sel.has(r.id)?'checked':''}></td>`:qual?`<td>${sel.has(r.id)?'✓':''}</td>`:''}</tr>`;}).join('');
+    return `<tr class="${cls}"><td class="num">${i+1}</td><td>${esc(r.name)}${isMe(r.id)?youLbl():''}</td>${groupsMode()?`<td>${r.group||''}</td>`:''}${showStage?`<td>${info[r.id].lbl}</td>`:''}${showStatus?`<td><span class="stt st-${st[0]}">${st[1]}</span></td>`:''}<td class="num">${r.played}</td><td class="num">${r.w}</td><td class="num">${T()===1?`${r.pw}:${r.pl}`:`${r.sw}:${r.sl}`}</td><td class="num">${diff>0?'+':''}${diff}</td>${qual&&S.admin?`<td><input type="checkbox" aria-label="${tr('Awans','Qualifies')}: ${esc(r.name)}" data-sel="${r.id}" ${sel.has(r.id)?'checked':''}></td>`:qual?`<td>${sel.has(r.id)?'✓':''}</td>`:''}</tr>`;}).join('');
   const order=T()===1?tr('zwycięstwa, bilans punktów, zdobyte punkty','wins, point difference, points scored'):tr('zwycięstwa, bilans setów, bilans punktów','wins, set difference, point difference');
   const sub=qual?tr(`Na granicy awansu jest remis (podświetlone wiersze). Organizator wybiera ${K} osób do drabinki.`,`There is a tie at the cut-off (highlighted rows). The organizer picks ${K} players for the bracket.`)
-    :post&&!rankView?tr(`Miejsca według etapu, do którego ktoś doszedł, a w obrębie etapu według rankingu z rund 1–2 (${order}). Mecze, zwycięstwa i punkty liczone z rund 1–2.`,`Places by the stage each player reached; within a stage, by the rounds 1–2 ranking (${order}). Matches, wins and points are counted from rounds 1–2.`)
+    :post&&!rankView?tr(`Miejsca według etapu, do którego ktoś doszedł, a w obrębie etapu według rankingu z ${groupsMode()?'fazy grupowej':roundN()>1?'rund 1–'+roundN():'rundy 1'} (${order}). Mecze, zwycięstwa i punkty liczone z ${groupsMode()?'fazy grupowej':roundN()>1?'rund 1–'+roundN():'rundy 1'}.`,`Places by the stage each player reached; within a stage, by the ${groupsMode()?'group stage':roundN()>1?'rounds 1–'+roundN():'round 1'} ranking (${order}). Matches, wins and points are counted from the ${groupsMode()?'group stage':roundN()>1?'rounds 1–'+roundN():'round 1'}.`)
     :tr(`${LL?`Miejsca 1–${D}: bezpośrednio do drabinki. Miejsca ${D+1}–${D+2*LL}: Lucky Losers, zwycięzcy ${LL} meczów dołączają do drabinki.${R.length>D+2*LL?' Pozostali kończą udział.':''}`:`Do drabinki wchodzi ${K} najlepszych.`} Kolejność: ${order}.`,
         `${LL?`Places 1–${D}: straight into the bracket. Places ${D+1}–${D+2*LL}: Lucky Losers, the winners of ${LL} ${LL===1?'match':'matches'} join the bracket.${R.length>D+2*LL?' Everyone else is out.':''}`:`The top ${K} go into the bracket.`} Order: ${order}.`)+(zones?tr(` Poniżej ostatniej linii odpadają przy obecnym układzie; kolumna Status pokazuje, kto jeszcze gra.`,` Anyone below the last line is out at the current standings; the Status column shows who is still in.`):'');
   const seg=post?`<div class="seg" role="group" aria-label="${tr('Widok tabeli','Table view')}"><button type="button" data-tview="final" aria-pressed="${!rankView}">${tr('Miejsca końcowe','Final standings')}</button><button type="button" data-tview="rank" aria-pressed="${rankView}">${tr('Progi awansu','Qualification cut-offs')}</button></div>`:'';
   const head=`<div class="sechead"><div><h2>${qual?tr('Tabela: awans do drabinki','Standings: bracket qualification'):tr('Tabela','Standings')}</h2><p class="sub">${sub}</p></div>${seg}</div>`;
-  return `<section>${head}<div class="tablewrap"><table><thead><tr><th class="num">#</th><th>${tr('Zawodnik','Player')}</th>${showStage?`<th>${tr('Etap','Stage')}</th>`:''}${showStatus?`<th>${tr('Status','Status')}</th>`:''}<th class="num">${tr('M','P')}</th><th class="num">${tr('Z','W')}</th><th class="num">${T()===1?tr('Punkty','Points'):tr('Sety','Sets')}</th><th class="num">+/−</th>${qual?`<th>${tr('Awans','Qualifies')}</th>`:''}</tr></thead><tbody>${body}</tbody></table></div>
+  return `<section>${head}<div class="tablewrap"><table><thead><tr><th class="num">#</th><th>${tr('Zawodnik','Player')}</th>${groupsMode()?`<th>${tr('Grupa','Group')}</th>`:''}${showStage?`<th>${tr('Etap','Stage')}</th>`:''}${showStatus?`<th>${tr('Status','Status')}</th>`:''}<th class="num">${tr('M','P')}</th><th class="num">${tr('Z','W')}</th><th class="num">${T()===1?tr('Punkty','Points'):tr('Sety','Sets')}</th><th class="num">+/−</th>${qual?`<th>${tr('Awans','Qualifies')}</th>`:''}</tr></thead><tbody>${body}</tbody></table></div>
     ${zones?`<div class="cutlabel">${tr('Przerywane linie: granica bezpośredniego awansu','Dashed lines: direct qualification cut-off')}${LL?tr(' i Lucky Losers',' and Lucky Losers'):''}</div>`:''}
     ${qual&&S.admin?`<div class="actions" style="margin-top:12px"><span class="chip mono">${sel.size}/${K} ${tr('wybranych','selected')}</span><button class="btn" data-admin="startko" ${sel.size!==K?'disabled':''}>${tr('Uruchom drabinkę','Start the bracket')}</button></div>`:''}
     ${qual&&!S.admin?`<p class="notice warn" style="margin-top:12px">${tr('Czekamy na decyzję organizatora. Drabinka pojawi się tu automatycznie.','Waiting for the organizer’s decision. The bracket will appear here automatically.')}</p>`:''}</section>`;
@@ -791,12 +877,18 @@ function podium(){
 function adminPanel(){
   const p=S.phase; const dl=S.deadline?toLocalInput(S.deadline):'';
   const mode=S.scoreMode||'points';
-  const N=S.players.length, auto=n=>tr('Automatycznie','Automatic')+' ('+n+')';
-  const kOpts=[['',auto(defaultK(N))]];
-  for(let k=2;k<=Math.min(64,pow2Floor(N));k*=2) if(k<=Math.max(2,N)) kOpts.push([k,`${k} ${tr(plural(k,'miejsce','miejsca','miejsc'),'places')} (${Math.round(100*k/Math.max(N,1))}%)`]);
-  const plans=['ko','done'].includes(p)?[]:bracketPlans(N);
-  const plansHtml=plans.length?`<div class="plans"><div class="qlbl">${tr(`Propozycje dla ${N} ${plural(N,'gracza','graczy','graczy')}`,`Suggestions for ${N} ${N===1?'player':'players'}`)}</div><div class="planlist">${plans.map(pl=>`<button type="button" class="plan ${pl.K===S.K&&pl.L===S.L?'on':''}" data-plan="${pl.K}:${pl.L}"><b>${pl.rec?'★ ':''}${pl.K} ${tr(plural(pl.K,'miejsce w drabince','miejsca w drabince','miejsc w drabince'),'bracket places')}${pl.rec?' · '+tr('zalecane','recommended'):''}</b><span>${planText(pl,N)}</span></button>`).join('')}</div></div>`:'';
-  const llOpts=llOptionsFor(S.K,N);
+  const N=S.players.length, locked=p!=='signup', fmt=S.format||'rounds', R=roundN(), gsz=S.groupSize||4, gadv=S.groupAdvance||2;
+  const bracketLocked=['ko','done'].includes(p);
+  const kOpts=[]; for(let k=2;k<=Math.min(64,pow2Floor(N));k*=2) if(k<=Math.max(2,N)) kOpts.push([String(k),`${k} ${tr(plural(k,'miejsce','miejsca','miejsc'),'places')} · ${Math.round(100*k/Math.max(N,1))}% ${tr('graczy','of players')}`]);
+  const llOpts=llOptionsFor(S.K,N,{groups:fmt==='groups',D0:S.D0||0});
+  const rPlans=bracketLocked?[]:bracketPlans(N), gPlans=bracketLocked?[]:groupPlans(N);
+  const head=tr(`Propozycje dla ${N} ${plural(N,'gracza','graczy','graczy')}`,`Suggestions for ${N} ${N===1?'player':'players'}`);
+  const plansHtml=(rPlans.length||gPlans.length)?`<div class="plans" id="plans-rounds" ${fmt==='groups'?'hidden':''}><div class="qlbl">${head} · ${tr('losowe rundy','random-opponent rounds')}</div>${listPlans(rPlans.map(pl=>`<button type="button" class="plan ${fmt==='rounds'&&pl.K===S.K&&pl.L===S.L?'on':''}" data-plan="${pl.K}:${pl.L}"><b>${pl.rec?'★ ':''}${pl.K} ${tr(plural(pl.K,'miejsce w drabince','miejsca w drabince','miejsc w drabince'),'bracket places')}${pl.rec?' · '+tr('zalecane','recommended'):''}</b><span>${planText(pl,N)}</span></button>`))}</div>
+  <div class="plans" id="plans-groups" ${fmt==='groups'?'':'hidden'}><div class="qlbl">${head} · ${tr('grupy','groups')}</div>${listPlans(gPlans.map((gp,i)=>`<button type="button" class="plan ${fmt==='groups'&&gp.size===gsz&&gp.adv===gadv&&gp.K===S.K?'on':''}" data-gplan="${gp.size}:${gp.adv}:${gp.K}"><b>${i===0?'★ ':''}${tr(`Grupy po ok. ${gp.size}`,`Groups of about ${gp.size}`)}${i===0?' · '+tr('zalecane','recommended'):''}</b><span>${groupPlanText(gp,N)}</span></button>`))}</div>`:'';
+  const late=['groups',...roundKeys()].includes(p);
+  const lateInfo=p==='groups'?tr('Dołączy do najmniejszej grupy i zagra z każdym jej członkiem.','They join the smallest group and play everyone in it.')
+    :p==='r1'?tr('Dostanie mecz w rundzie 1 (z osobą bez pary albo z losowym rywalem, liczony tylko dla niego). W kolejnych rundach zagra normalnie.','They get a round 1 match (against someone without a partner or a random opponent, counted only for them). They play the following rounds normally.')
+    :tr(`Dostanie ${p[1]} ${plural(+p[1],'mecz','mecze','meczów')} w rundzie ${p[1]} z losowymi rywalami, liczone tylko dla niego.`,`They get ${p[1]} matches in round ${p[1]} against random opponents, counted only for them.`);
   return `<section class="admin">
   <p class="sub" style="margin:0">${S.demo?tr('W wersji demo jesteś organizatorem. Wszystko dzieje się w Twojej przeglądarce.','In the demo you are the organizer. Everything happens in your browser.'):tr('Widzisz go tylko na urządzeniu, na którym otwarto link organizatora. Nie udostępniaj go dalej.','You only see this on the device where the organizer link was opened. Do not share it.')}</p>
   ${plansHtml}
@@ -804,20 +896,25 @@ function adminPanel(){
     <label class="f">${tr('Nazwa turnieju','Tournament name')}<input id="s_title" value="${esc(S.title)}" maxlength="120"></label>
     <label class="f">${tr('Edycja','Edition')}<input id="s_ed" value="${esc(S.edition)}" maxlength="60"></label>
     <label class="f">${tr('Nagroda (opcjonalnie)','Prize (optional)')}<input id="s_prize" value="${esc(S.prize||'')}" maxlength="80" placeholder="${tr('np. puchar i wieczna chwała','e.g. trophy and eternal glory')}"></label>
-    <label class="f">${tr('Mecz do wygranych setów','Sets to win a match')}<select id="s_sets" ${p!=='signup'?'disabled':''}>${[1,2,3].map(v=>`<option value="${v}" ${v===T()?'selected':''}>${v}</option>`).join('')}</select></label>
+    <label class="f">${tr('Mecz do wygranych setów','Sets to win a match')}<select id="s_sets" ${locked?'disabled':''}>${[1,2,3].map(v=>`<option value="${v}" ${v===T()?'selected':''}>${v}</option>`).join('')}</select></label>
     <label class="f">${tr('Wpisywanie wyników','Score entry')}<select id="s_mode"><option value="points" ${mode==='points'?'selected':''}>${T()===1?tr('Punkty seta','Set points'):tr('Punkty każdego seta','Points of every set')}</option><option value="sets" ${mode==='sets'?'selected':''}>${T()===1?tr('Tylko zwycięzca (szybciej)','Winner only (faster)'):tr('Tylko wynik w setach (szybciej)','Sets only (faster)')}</option></select></label>
-    <label class="f">${tr('Miejsca w drabince','Bracket places')}<select id="s_k" ${['ko','done'].includes(p)?'disabled':''}>${kOpts.map(([v,l])=>`<option value="${v}" ${String(S.koSize||'')===String(v)?'selected':''}>${l}</option>`).join('')}</select></label>
-    <label class="f">${tr('Miejsca dla Lucky Losers','Lucky Losers places')}<select id="s_ll" ${['ko','done'].includes(p)?'disabled':''}>${llOpts.map(([v,l])=>`<option value="${v}" ${String(S.llSpots??'')===String(v)?'selected':''}>${l}</option>`).join('')}</select></label>
-    <label class="f">${tr('Automatyczne losowanie o','Automatic draw at')}<input id="s_dl" type="datetime-local" value="${dl}" ${p!=='signup'?'disabled':''}></label>
+    <label class="f">${tr('Format kwalifikacji','Qualification format')}<select id="s_fmt" ${locked?'disabled':''}><option value="rounds" ${fmt==='rounds'?'selected':''}>${tr('Losowe rundy','Random-opponent rounds')}</option><option value="groups" ${fmt==='groups'?'selected':''}>${tr('Grupy (każdy z każdym)','Groups (round-robin)')}</option></select></label>
+    <label class="f fmt-rounds" ${fmt==='rounds'?'':'hidden'}>${tr('Liczba rund (tyle meczów zagra każdy)','Number of rounds (matches per player)')}<select id="s_rounds" ${locked?'disabled':''}>${[1,2,3,4,5,6].map(v=>`<option value="${v}" ${v===R?'selected':''}>${v}</option>`).join('')}</select></label>
+    <label class="f fmt-groups" ${fmt==='groups'?'':'hidden'}>${tr('Wielkość grup','Group size')}<select id="s_gsize" ${locked?'disabled':''}>${[3,4,5,6].map(v=>`<option value="${v}" ${v===gsz?'selected':''}>${tr('ok. '+v+' graczy','about '+v+' players')}</option>`).join('')}</select></label>
+    <label class="f fmt-groups" ${fmt==='groups'?'':'hidden'}>${tr('Awansuje z grupy','Advance from each group')}<select id="s_gadv" ${locked?'disabled':''}>${[1,2].map(v=>`<option value="${v}" ${v===gadv?'selected':''}>${v} ${tr(plural(v,'gracz','graczy','graczy'),v===1?'player':'players')}</option>`).join('')}</select></label>
+    <p class="sub" id="fmtinfo" style="grid-column:1/-1;margin:0">${fmtInfoText(fmt,N,R,gsz,gadv)}</p>
+    <label class="f">${tr('Miejsca w drabince','Bracket places')}<select id="s_k" data-init="${S.K}" ${bracketLocked?'disabled':''}>${kOpts.map(([v,l])=>`<option value="${v}" ${String(S.K)===v?'selected':''}>${l}</option>`).join('')}</select></label>
+    <label class="f">${tr('Miejsca dla Lucky Losers','Lucky Losers places')}<select id="s_ll" data-init="${S.L}" ${bracketLocked?'disabled':''}>${llOpts.map(([v,l])=>`<option value="${v}" ${String(S.L)===v?'selected':''}>${l}</option>`).join('')}</select></label>
+    <label class="f">${tr('Automatyczne losowanie o','Automatic draw at')}<input id="s_dl" type="datetime-local" value="${dl}" ${locked?'disabled':''}></label>
     <div style="display:flex;align-items:end"><button class="btn" type="submit">${tr('Zapisz ustawienia','Save settings')}</button></div>
   </form>
   ${p==='signup'?`<form id="addf" class="join" style="margin:0"><input id="a_name" maxlength="28" placeholder="${tr('Dopisz kogoś ręcznie','Add someone manually')}"><button class="ghost" type="submit">${tr('Dodaj','Add')}</button></form>`:''}
-  ${['r1','r2'].includes(p)?`<form id="latef" class="join" style="margin:0"><input id="l_name" maxlength="28" placeholder="${tr('Spóźniony gracz, np. Tomek R.','Late player, e.g. Tom R.')}"><button class="ghost" type="submit">${tr('Dopisz do gry','Add to the game')}</button></form>
-  <p class="sub" style="margin:0">${p==='r1'?tr('Dostanie mecz w rundzie 1 (z osobą bez pary albo z losowym rywalem, liczony tylko dla niego). W rundzie 2 zagra normalnie.','They get a round 1 match (against someone without a partner or a random opponent, counted only for them). They play round 2 normally.'):tr('Dostanie dwa mecze w rundzie 2 z losowymi rywalami, liczone tylko dla niego.','They get two round 2 matches against random opponents, counted only for them.')}</p>`:''}
+  ${late?`<form id="latef" class="join" style="margin:0"><input id="l_name" maxlength="28" placeholder="${tr('Spóźniony gracz, np. Tomek R.','Late player, e.g. Tom R.')}"><button class="ghost" type="submit">${tr('Dopisz do gry','Add to the game')}</button></form>
+  <p class="sub" style="margin:0">${lateInfo}</p>`:''}
   <div class="actions">
     ${p==='signup'?`<button class="btn" data-admin="draw" ${S.players.length<3?'disabled':''}>${tr('Zamknij zapisy i losuj','Close sign-ups and draw')}</button>`:''}
-    ${['r2','qual','ko','done'].includes(p)?`<button class="ghost small" data-confirm="rollback:r1">${tr('Cofnij do rundy 1','Roll back to round 1')}</button>`:''}
-    ${['qual','ll','ko','done'].includes(p)&&S.r2.length?`<button class="ghost small" data-confirm="rollback:r2">${tr('Cofnij do rundy 2','Roll back to round 2')}</button>`:''}
+    ${roundKeys().filter(k=>(S[k]||[]).length&&PH.indexOf(p)>PH.indexOf(k)).map(k=>`<button class="ghost small" data-confirm="rollback:${k}">${tr('Cofnij do rundy '+k[1],'Roll back to round '+k[1])}</button>`).join('')}
+    ${fmt==='groups'&&(S.gm||[]).length&&PH.indexOf(p)>PH.indexOf('groups')?`<button class="ghost small" data-confirm="rollback:groups">${tr('Cofnij do grup','Roll back to the groups')}</button>`:''}
     ${['ko','done'].includes(p)&&S.ll&&S.ll.length?`<button class="ghost small" data-confirm="rollback:ll">${tr('Cofnij do Lucky Losers','Roll back to Lucky Losers')}</button>`:''}
     ${p!=='signup'?`<button class="ghost small" data-confirm="reopen">${tr('Wróć do zapisów','Back to sign-ups')}</button>`:''}
     <button class="ghost small danger" data-confirm="reset">${tr('Nowy turniej','New tournament')}</button>
@@ -839,7 +936,7 @@ function bind(){
     if(a==='sim') return TTEngine.simulateStage();
     if(a==='fresh') return TTEngine.freshWithPlayers(DEMO_NAMES);
     if(a==='random'){ const st=randomTournament(), i=randomTournament.info;
-      toast(tr(`Losowy turniej: ${i.n} osób, ${i.sets===1?'1 set':`mecz do ${i.sets} wygranych setów`}, drabinka na ${i.K} miejsc.`,`Random tournament: ${i.n} players, ${i.sets===1?'single set':`first to ${i.sets} sets`}, bracket of ${i.K}.`)); return st; }
+      toast(tr(`Losowy turniej: ${i.n} osób, ${i.format==='groups'?'grupy':`${i.rounds} ${plural(i.rounds,'runda','rundy','rund')}`}, ${i.sets===1?'1 set':`mecz do ${i.sets} wygranych setów`}, drabinka na ${i.K} miejsc.`,`Random tournament: ${i.n} players, ${i.format==='groups'?'groups':`${i.rounds} ${i.rounds===1?'round':'rounds'}`}, ${i.sets===1?'single set':`first to ${i.sets} sets`}, bracket of ${i.K}.`)); return st; }
     const r=await fetch('demo-data.json'); return TTEngine.loadState(await r.json());
   },{sim:tr('Wyniki wylosowane.','Results drawn at random.'),fresh:tr('Nowy turniej: 26 osób na liście, zamknij zapisy w panelu organizatora.','New tournament: 26 people on the list, close sign-ups in the organizer panel.'),random:'',sample:tr('Wczytano przykładowy turniej.','Sample tournament loaded.')}[b.dataset.demo]));
   const jf=$('#joinf'); if(jf) jf.addEventListener('submit',e=>{e.preventDefault(); const n=$('#jname').value;
@@ -852,13 +949,39 @@ function bind(){
     run(()=>api('api/admin',{action:'select',sel:[...sel]}));});
   document.querySelectorAll('[data-confirm]').forEach(b=>b.onclick=()=>confirmBox(b.dataset.confirm));
   document.querySelectorAll('[data-rename]').forEach(b=>b.onclick=()=>renameBox(b.dataset.rename));
-  document.querySelectorAll('[data-plan]').forEach(b=>b.onclick=()=>{ const [K,L]=b.dataset.plan.split(':').map(Number); run(()=>api('api/admin',{action:'settings',koSize:K,llSpots:L}),tr(`Zastosowano: drabinka na ${K} miejsc, Lucky Losers: ${L}.`,`Applied: bracket of ${K}, Lucky Losers: ${L}.`)); });
-  const sk=$('#s_k'); if(sk) sk.addEventListener('change',()=>{ const N=S.players.length, K=sk.value?+sk.value:defaultK(N), sl=$('#s_ll'), prev=sl.value;
-    sl.innerHTML=llOptionsFor(K,N).map(([v,l])=>`<option value="${v}">${l}</option>`).join(''); if([...sl.options].some(o=>o.value===prev)) sl.value=prev; });
+  document.querySelectorAll('[data-plan]').forEach(b=>b.onclick=()=>{ const [K,L]=b.dataset.plan.split(':').map(Number); run(()=>api('api/admin',{action:'settings',...(S.phase==='signup'?{format:'rounds'}:{}),koSize:K,llSpots:L}),tr(`Zastosowano: drabinka na ${K} miejsc, Lucky Losers: ${L}.`,`Applied: bracket of ${K}, Lucky Losers: ${L}.`)); });
+  document.querySelectorAll('[data-gplan]').forEach(b=>b.onclick=()=>{ const [size,adv,K]=b.dataset.gplan.split(':').map(Number); run(()=>api('api/admin',{action:'settings',format:'groups',groupSize:size,groupAdvance:adv,koSize:K,llSpots:0}),tr(`Zastosowano: grupy po ok. ${size}, awansuje ${adv}, drabinka na ${K}.`,`Applied: groups of about ${size}, ${adv} advance, bracket of ${K}.`)); });
+  const sfmt=$('#s_fmt');
+  if(sfmt){
+    const N=S.players.length, val=id=>+$('#'+id).value;
+    const rebuildLL=(recommended)=>{
+      const f=sfmt.value, K=val('s_k'), sl=$('#s_ll'), prev=sl.value;
+      sl.innerHTML=llOptionsFor(K,N,{groups:f==='groups',D0:groupDirectFor(N,val('s_gsize'),val('s_gadv'))}).map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
+      const rec=f==='groups'?'0':String(autoL(K,N));
+      sl.value=(!recommended&&[...sl.options].some(o=>o.value===prev))?prev:([...sl.options].some(o=>o.value===rec)?rec:'0');
+      sl.dataset.touched='1';
+    };
+    const refreshInfo=()=>{ $('#fmtinfo').textContent=fmtInfoText(sfmt.value,N,val('s_rounds'),val('s_gsize'),val('s_gadv')); };
+    const onFormat=()=>{
+      const f=sfmt.value;
+      document.querySelectorAll('.fmt-rounds').forEach(e=>e.hidden=f!=='rounds');
+      document.querySelectorAll('.fmt-groups').forEach(e=>e.hidden=f!=='groups');
+      $('#plans-rounds').hidden=f!=='rounds'; $('#plans-groups').hidden=f!=='groups';
+      const K=f==='groups'?autoKGroups(N,val('s_gsize'),val('s_gadv')):defaultK(N), sk=$('#s_k');
+      if([...sk.options].some(o=>+o.value===K)) sk.value=String(K);
+      sk.dataset.touched='1'; rebuildLL(true); refreshInfo();
+    };
+    ['s_fmt','s_gsize','s_gadv'].forEach(id=>$('#'+id).addEventListener('change',onFormat));
+    $('#s_rounds').addEventListener('change',refreshInfo);
+    $('#s_k').addEventListener('change',()=>{ $('#s_k').dataset.touched='1'; rebuildLL(false); });
+    $('#s_ll').addEventListener('change',()=>{ $('#s_ll').dataset.touched='1'; });
+  }
   const sf=$('#setf'); if(sf) sf.addEventListener('submit',e=>{e.preventDefault();
     const dlv=$('#s_dl').value; const body={action:'settings',title:$('#s_title').value,edition:$('#s_ed').value,prize:$('#s_prize').value,scoreMode:$('#s_mode').value};
-    if(!$('#s_k').disabled) body.koSize=$('#s_k').value||null;
-    if(!$('#s_ll').disabled) body.llSpots=$('#s_ll').value===''?null:+$('#s_ll').value;
+    // format first, then sizes; bracket and Lucky Losers places are only sent once the organizer has picked them
+    if(!$('#s_fmt').disabled){ body.format=$('#s_fmt').value; body.rounds=+$('#s_rounds').value; body.groupSize=+$('#s_gsize').value; body.groupAdvance=+$('#s_gadv').value; }
+    if(!$('#s_k').disabled&&($('#s_k').dataset.touched||$('#s_k').value!==$('#s_k').dataset.init)) body.koSize=+$('#s_k').value;
+    if(!$('#s_ll').disabled&&($('#s_ll').dataset.touched||$('#s_ll').value!==$('#s_ll').dataset.init)) body.llSpots=+$('#s_ll').value;
     if(!$('#s_sets').disabled) body.setsToWin=+$('#s_sets').value;
     if(!$('#s_dl').disabled) body.deadline=dlv?new Date(dlv).toISOString():null;
     run(()=>api('api/admin',body),tr('Zapisano ustawienia.','Settings saved.'));});
@@ -866,7 +989,7 @@ function bind(){
   const af=$('#addf'); if(af) af.addEventListener('submit',e=>{e.preventDefault(); run(()=>api('api/admin',{action:'add',name:$('#a_name').value}),tr('Dodano zawodnika.','Player added.'));});
 }
 
-function findMatch(stage,id){ if(stage==='r1'||stage==='r2'||stage==='ll') return (S[stage]||[]).find(m=>m.id===id); if(stage==='ko') return S.ko.rounds.flat().find(m=>m.id===id); return S.ko.third; }
+function findMatch(stage,id){ if(isRoundPhase(stage)||stage==='ll') return (S[stage]||[]).find(m=>m.id===id); if(stage==='g') return (S.gm||[]).find(m=>m.id===id); if(stage==='ko') return S.ko.rounds.flat().find(m=>m.id===id); return S.ko.third; }
 function showDlg(html,onBind){ const f=$('#dlgform'); f.innerHTML=html; const d=$('#dlg'); dlgOpen=true; d.showModal(); onBind&&onBind(f); d.onclose=()=>{dlgOpen=false; refresh(true);}; }
 
 function timingRow(m){
@@ -966,10 +1089,11 @@ function confirmBox(what){
   const txt={
     reset:[tr('Nowy turniej?','New tournament?'),tr('Wszystkie mecze zostaną usunięte. Możesz zachować listę zapisanych osób.','All matches will be deleted. You can keep the list of signed-up players.')],
     reopen:[tr('Wrócić do zapisów?','Back to sign-ups?'),tr('Usunie losowanie i wszystkie wyniki. Lista zawodników zostaje.','This removes the draw and all results. The player list stays.')],
-    rollback:[to==='ll'?tr('Cofnąć do Lucky Losers?','Roll back to Lucky Losers?'):tr(`Cofnąć do rundy ${to==='r1'?'1':'2'}?`,`Roll back to round ${to==='r1'?'1':'2'}?`),
-      to==='r1'?tr('Usunie rundę 2, Lucky Losers i drabinkę. Wyniki rundy 1 zostają.','This removes round 2, Lucky Losers and the bracket. Round 1 results stay.')
-      :to==='r2'?tr('Usunie Lucky Losers i drabinkę. Wyniki rund 1 i 2 zostają.','This removes Lucky Losers and the bracket. Round 1 and 2 results stay.')
-      :tr('Usunie drabinkę. Wyniki Lucky Losers zostają.','This removes the bracket. Lucky Losers results stay.')]}[act];
+    rollback:[to==='ll'?tr('Cofnąć do Lucky Losers?','Roll back to Lucky Losers?'):to==='groups'?tr('Cofnąć do grup?','Roll back to the groups?'):tr(`Cofnąć do rundy ${to.slice(1)}?`,`Roll back to round ${to.slice(1)}?`),
+      to==='ll'?tr('Usunie drabinkę. Wyniki Lucky Losers zostają.','This removes the bracket. Lucky Losers results stay.')
+      :to==='groups'?tr('Usunie Lucky Losers i drabinkę. Wyniki grup zostają.','This removes Lucky Losers and the bracket. Group results stay.')
+      :+to.slice(1)>=roundN()?tr(`Usunie Lucky Losers i drabinkę. Wyniki rund 1–${to.slice(1)} zostają.`,`This removes Lucky Losers and the bracket. Results of rounds 1–${to.slice(1)} stay.`)
+      :tr(`Usunie kolejne rundy, Lucky Losers i drabinkę. Wyniki rund 1–${to.slice(1)} zostają.`,`This removes the following rounds, Lucky Losers and the bracket. Results of rounds 1–${to.slice(1)} stay.`)]}[act];
   showDlg(`<h3>${txt[0]}</h3><p class="sub">${txt[1]}</p><div class="err" id="derr"></div><div class="row">
     <button type="button" class="ghost" id="dcan">${tr('Anuluj','Cancel')}</button>
     ${act==='reset'?`<button type="button" class="ghost danger" id="dok2">${tr('Wyczyść też zawodników','Clear players too')}</button><button type="button" class="btn" id="dok">${tr('Zachowaj zawodników','Keep players')}</button>`:`<button type="button" class="btn" id="dok">${tr('Tak, cofnij','Yes, roll back')}</button>`}</div>`,
