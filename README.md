@@ -35,7 +35,8 @@ The app was built in Polish, because that's who it was built for, and later got 
 - Manual draw, or an automatic draw at a set time.
 - Adding late players during rounds 1 and 2, so they still get their two matches.
 - Rolling the tournament back to an earlier stage without losing earlier results.
-- Settings: name, edition, prize, match format (1–3 sets), bracket size, number of Lucky Losers spots.
+- Settings: name, edition, prize, match format (1–3 sets), score entry mode, bracket size and number of Lucky Losers spots (including none).
+- **Suggestions computed from the number of players.** The organizer panel lists a few ready-made options, each with what it means in practice, and applies one with a click. For example with 20 players: ★ 8 bracket places (6 straight in + 2 via Lucky Losers, 40% advance), the same without Lucky Losers, 8 places with 4 Lucky Losers spots, 4 places, or 16 places (80% advance). The bracket-size and Lucky Losers lists also adapt to the number of players (bracket sizes from 2 to 64).
 
 **Tournament format**
 1. **Round 1.** Random pairs, everyone plays one match.
@@ -62,6 +63,10 @@ With an odd number of players, the player without a pair gets an extra match aga
 | Match to 2 sets: points of every set (EN) | Mecz do 2 setów: punkty każdego seta (PL) |
 |---|---|
 | ![Entering the points of every set](docs/screenshots/sets-dialog-en.jpg) | ![Wpisywanie punktów każdego seta](docs/screenshots/sets-dialog-pl.jpg) |
+
+| Organizer panel: bracket suggestions for 20 players (EN) | Panel organizatora: propozycje drabinki dla 20 graczy (PL) |
+|---|---|
+| ![Bracket and Lucky Losers suggestions](docs/screenshots/bracket-plans-en.jpg) | ![Propozycje drabinki i Lucky Losers](docs/screenshots/bracket-plans-pl.jpg) |
 
 ---
 
@@ -131,8 +136,8 @@ tests/           full-tournament simulations for both engines
 
 ```bash
 python3 server/server.py
-# Turniej działa: http://localhost:8187/
-# Link organizatora (nie udostępniaj): http://localhost:8187/#admin-...
+# Tournament is running: http://localhost:8187/
+# Organizer link (do not share): http://localhost:8187/#admin-...
 ```
 
 Only Python 3.10+ is required. Environment variables: `TT_PORT`, `TT_BIND`, `TT_DATA` (directory for the state and token) and `TT_STATIC`.
