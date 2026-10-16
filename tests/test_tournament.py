@@ -122,6 +122,27 @@ class TournamentTest(unittest.TestCase):
         self.assertNotIn("t0", m)
         self.assertNotIn("t1", m)
 
+    def test_started_matches_take_the_lowest_free_table(self):
+        s = new_tournament(8, tables=3)
+        ms = s["r1"]
+        for m in ms[:3]:
+            S.start_match(s, "r1", m["id"])
+        self.assertEqual([m["tbl"] for m in ms[:3]], [1, 2, 3])
+        S.set_score(s, "r1", ms[1]["id"], None, None, True, 11, 5)
+        self.assertIn("fin", ms[1])
+        S.start_match(s, "r1", ms[3]["id"])
+        self.assertEqual(ms[3]["tbl"], 2, "the freed table is reused")
+        S.start_match(s, "r1", ms[0]["id"], cancel=True)
+        self.assertNotIn("tbl", ms[0])
+
+    def test_tables_setting_is_validated(self):
+        s = new_tournament(4)
+        S.admin_action(s, {"action": "settings", "tables": 5})
+        self.assertEqual(s["tables"], 5)
+        for bad in (0, 17):
+            with self.assertRaises(S.Err):
+                S.admin_action(s, {"action": "settings", "tables": bad})
+
     def test_untimed_match_has_no_duration(self):
         s = new_tournament(4)
         m = s["r1"][0]

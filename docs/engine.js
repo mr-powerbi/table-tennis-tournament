@@ -36,7 +36,7 @@
   function newState() {
     return {
       title: DEFAULT_TITLE, edition: 'Edycja 2026', prize: '', setsToWin: 1, scoreMode: 'points', format: 'rounds', groupSize: 4, groupAdvance: 2, groups: [], gm: [],
-      koSize: null, llSpots: null, advancePct: null, luckyLosers: false, llMode: 'playoff', llTable: [], deadline: null, phase: 'signup', players: [],
+      tables: 2, koSize: null, llSpots: null, advancePct: null, luckyLosers: false, llMode: 'playoff', llTable: [], deadline: null, phase: 'signup', players: [],
       r1: [], r2: [], r3: [], r4: [], r5: [], r6: [], rounds: 2, ll: [], llDirect: [], sel: null, ko: null, rev: 0, updated: now(),
     };
   }
@@ -308,7 +308,7 @@
   function setp(m, a, b) {
     if (m.a !== a || m.b !== b) {
       Object.assign(m, { a, b, sa: null, sb: null, pa: null, pb: null, sets: null });
-      delete m.t0; delete m.t1;
+      delete m.t0; delete m.t1; delete m.fin; delete m.tbl;
     }
   }
 
@@ -316,7 +316,7 @@
     if (m[side] !== id) {
       m[side] = id;
       Object.assign(m, { sa: null, sb: null, pa: null, pb: null, sets: null });
-      delete m.t0; delete m.t1;
+      delete m.t0; delete m.t1; delete m.fin; delete m.tbl;
     }
   }
   function propagate(s) {
@@ -482,8 +482,15 @@
     }
     Object.assign(m, clearing ? { sa: null, sb: null, pa: null, pb: null, sets: null } : { sa, sb, pa, pb, sets: setList });
     // Match time: the organizer records the start, entering the result is the end.
-    if (clearing) { delete m.t0; delete m.t1; } else if (m.t0 && !m.t1) m.t1 = now();
+    if (clearing) { delete m.t0; delete m.t1; delete m.fin; delete m.tbl; } else { if (m.t0 && !m.t1) m.t1 = now(); m.fin = now(); }
     if (stage === 'ko' || stage === 'third' || stage === 'pre') propagate(s); else advance(s);
+  }
+
+  function allMatches(s) {
+    const out = [...(s.gm || []), ...(s.ll || [])];
+    ROUND_KEYS.forEach((k) => out.push(...(s[k] || [])));
+    if (s.ko) out.push(...(s.ko.pre || []), ...s.ko.rounds.flat(), ...(s.ko.third ? [s.ko.third] : []));
+    return out;
   }
 
   function startMatch(s, stage, id, cancel) {
@@ -491,7 +498,13 @@
     const m = findMatch(s, stage, id);
     if (!(m.a && m.b)) throw new Err('W tym meczu nie ma jeszcze obu zawodników.');
     if (m.sa !== null && m.sa !== undefined) throw new Err('Ten mecz ma już wynik.');
-    if (cancel) { delete m.t0; delete m.t1; } else { m.t0 = now(); delete m.t1; }
+    if (cancel) { delete m.t0; delete m.t1; delete m.fin; delete m.tbl; } else {
+      // the match takes the lowest free table
+      const used = new Set(allMatches(s).filter((x) => x !== m && x.t0 && x.sa === null && x.tbl).map((x) => x.tbl));
+      let k = 1;
+      while (used.has(k)) k++;
+      m.t0 = now(); m.tbl = k; delete m.t1; delete m.fin;
+    }
   }
 
   function cleanName(n) {
@@ -517,6 +530,11 @@
   function adminAction(s, body) {
     const act = body.action;
     if (act === 'settings') {
+      if ('tables' in body) {
+        const v = parseInt(body.tables, 10);
+        if (!(v >= 1 && v <= 16)) throw new Err('Liczba stołów musi mieścić się między 1 a 16.');
+        s.tables = v;
+      }
       if ('title' in body) s.title = String(body.title).trim().slice(0, 120) || DEFAULT_TITLE;
       if ('edition' in body) s.edition = String(body.edition).trim().slice(0, 60);
       if ('prize' in body) s.prize = String(body.prize || '').trim().slice(0, 80);
@@ -639,7 +657,7 @@
       else throw new Err('Nie można cofnąć do tego etapu.');
     } else if (act === 'reset') {
       const ns = newState();
-      for (const k of ['title', 'edition', 'prize', 'setsToWin', 'scoreMode', 'rounds', 'format', 'groupSize', 'groupAdvance', 'koSize', 'llSpots', 'advancePct', 'luckyLosers', 'llMode']) ns[k] = s[k] ?? ns[k];
+      for (const k of ['title', 'edition', 'prize', 'setsToWin', 'scoreMode', 'rounds', 'format', 'groupSize', 'groupAdvance', 'koSize', 'llSpots', 'advancePct', 'luckyLosers', 'llMode', 'tables']) ns[k] = s[k] ?? ns[k];
       if (body.keepPlayers) ns.players = s.players;
       ns.rev = s.rev || 0;
       Object.keys(s).forEach((k) => delete s[k]);
@@ -748,7 +766,15 @@
     // In the bracket we play one round at a time so the winners can be seen advancing.
     const koLevels = stage === 'ko' ? [s.ko.pre || [], ...s.ko.rounds] : [];
     const firstRound = stage === 'ko' ? koLevels.findIndex((r) => r.some((m) => m.a && m.b && m.sa === null)) : -1;
+    // about 5 minutes per match; matches already played are moved back in time to make room
+    const durs = todo.map(() => (3 + Math.random() * 4) * 60000);
+    const total = durs.reduce((a, b) => a + b, 0);
+    allMatches(s).forEach((x) => { for (const k of ['t0', 't1', 'fin']) if (x[k]) x[k] = new Date(Date.parse(x[k]) - total).toISOString(); });
+    let clock = Date.now() - total;
+    const tbls = Math.max(1, s.tables || 2);
+    let idx = 0;
     for (const [st, m] of todo) {
+      const dur = durs[idx], tbl = (idx % tbls) + 1; idx++;
       if (stage === 'ko' && (st === 'ko' || st === 'pre') && !koLevels[firstRound].includes(m)) continue;
       if (T === 1) {
         // ~15% of matches reach deuce (10:10); every further exchange extends the game with ~45% chance,
@@ -756,7 +782,7 @@
         let lose;
         if (Math.random() < 0.15) { lose = 10; while (lose < 40 && Math.random() < 0.45) lose++; } else lose = Math.floor(Math.random() * 10);
         const [pa, pb] = Math.random() < 0.5 ? [lose >= 10 ? lose + 2 : 11, lose] : [lose, lose >= 10 ? lose + 2 : 11];
-        m.t0 = new Date(Date.now() - (5 + (pa + pb) * 0.5 + Math.random() * 6) * 60000).toISOString();
+        m.t0 = new Date(clock).toISOString();
         if (pointsMode) setScore(s, st, m.id, null, null, pa, pb);
         else setScore(s, st, m.id, pa > pb ? 1 : 0, pa > pb ? 0 : 1);
       } else {
@@ -772,10 +798,11 @@
           const win = lose >= 10 ? lose + 2 : 11;
           return (winWins === aWins) ? [win, lose] : [lose, win];
         });
-        m.t0 = new Date(Date.now() - (8 + sets.length * 6 + Math.random() * 10) * 60000).toISOString();
+        m.t0 = new Date(clock).toISOString();
         if (pointsMode) setScore(s, st, m.id, null, null, null, null, sets);
         else setScore(s, st, m.id, aWins ? T : l, aWins ? l : T);
       }
+      m.t1 = m.fin = new Date(clock + dur).toISOString(); m.tbl = tbl; clock += dur;
     }
     save(s);
     return publicState(s);

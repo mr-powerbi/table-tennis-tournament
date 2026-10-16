@@ -168,6 +168,12 @@ tr.me td{font-weight:800}
 }
 
 details.statsbox .stats{margin-bottom:16px}
+.tboard{margin:0 0 14px;border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:10px 14px}
+.tboard>summary{cursor:pointer;font-weight:700;list-style:none}.tboard>summary small{font-weight:500;color:var(--muted);margin-left:6px}
+.tboard .tables{list-style:none;margin:10px 0 6px;padding:0;display:grid;gap:6px}.tboard .tables li{display:flex;gap:10px;align-items:baseline}
+.tboard .tn{min-width:64px;font-weight:700;color:var(--coral)}.tboard .free{color:var(--muted)}
+.tboard .lrow{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap;align-items:baseline}.tboard .lk{min-width:64px;font-weight:700}
+.livechip{margin:0 0 10px}
 .match .ticking{color:var(--coral-deep);font-weight:700}
 .timing{margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;font-size:.92rem}
 .f[hidden]{display:none}
@@ -316,7 +322,8 @@ const ERR_EN={
 'Drabinka może mieć 2, 4, 8, 16, 32 lub 64 miejsca.':'The bracket can have 2, 4, 8, 16, 32 or 64 places.',
 'Drabinka już ruszyła. Cofnij turniej, aby zmienić jej rozmiar.':'The bracket has already started. Roll the tournament back to change its size.',
 'Miejsc dla Lucky Losers może być od 0 do 64.':'Lucky Losers places can be from 0 to 64.',
-'Odsetek awansujących musi mieścić się między 5% a 95%.':'The share of advancing players must be between 5% and 95%.',
+'Odsetek awansujących musi mieścić się między 1% a 100%.':'The share of advancing players must be between 1% and 100%.',
+'Liczba stołów musi mieścić się między 1 a 16.':'The number of tables must be between 1 and 16.',
 'Lucky Losers mogą się dogrywać albo awansować z tabeli.':'Lucky Losers either play off or advance by the table.',
 'Drabinka już ruszyła. Cofnij turniej, aby zmienić jej ustawienia.':'The bracket has already started. Roll the tournament back to change its settings.',
 'W Lucky Losers są już wyniki. Cofnij turniej, aby zmienić ustawienia drabinki.':'Lucky Losers already has results. Roll the tournament back to change the bracket settings.',
@@ -452,7 +459,7 @@ function randomTournament(){
   for(let i=pool.length-1;i>0;i--){ const j=rnd(0,i); [pool[i],pool[j]]=[pool[j],pool[i]]; }
   TTEngine.freshWithPlayers(pool.slice(0,n));
   const sets=[1,1,1,2,3][rnd(0,4)], groups=Math.random()<.4;
-  const settings={action:'settings',setsToWin:sets,scoreMode:Math.random()<.65?'points':'sets',koSize:null,llSpots:null,
+  const settings={action:'settings',tables:rnd(2,4),setsToWin:sets,scoreMode:Math.random()<.65?'points':'sets',koSize:null,llSpots:null,
     luckyLosers:Math.random()<.5,llMode:Math.random()<.5?'playoff':'table',
     ...(groups?{format:'groups',groupSize:rnd(3,5),groupAdvance:rnd(1,2)}:{format:'rounds',rounds:rnd(1,4),advancePct:ADV_PCTS[rnd(2,9)]})};
   try{ TTEngine.request('api/admin',settings); }catch(e){ TTEngine.request('api/admin',{action:'settings',setsToWin:sets}); }
@@ -515,6 +522,7 @@ function render(){
   header(); steps();
   const out=[], ph=S.phase, post=['ko','done'].includes(ph), R=roundN(), roundPh=isRoundPhase(ph), gm=groupsMode();
   if(S.demo) out.push(demoBar());
+  out.push(liveSec());
   if(ph==='done') out.push(podium());
   if(ph==='signup') out.push(signup());
   if(post) out.push(bracket(), statsSec());
@@ -544,6 +552,38 @@ function render(){
   bind();
 }
 
+// ----- live table board: who plays where, who is next, what just finished (the viewer chooses to show it; remembered per browser) -----
+const livePref=()=>Object.assign({show:true,open:true},LS.get('ttt_live')||{});
+function liveSet(p){ LS.set('ttt_live',Object.assign(livePref(),p)); render(); }
+function liveMatches(){
+  const out=[]; const add=ms=>(ms||[]).forEach(m=>out.push(m));
+  roundKeys().forEach(k=>add(S[k])); add(S.gm); add(S.ll);
+  if(S.ko){ add(S.ko.pre); S.ko.rounds.forEach(add); if(S.ko.third) out.push(S.ko.third); }
+  return out;
+}
+function liveSec(){
+  const ph=S.phase;
+  if(['signup','done'].includes(ph)||!(S.players||[]).length) return '';
+  const pf=livePref();
+  if(!pf.show) return `<div class="livechip"><button type="button" class="ghost small" id="liveshow">🏓 ${tr('Pokaż stoły na żywo','Show live tables')}</button></div>`;
+  const cur=isRoundPhase(ph)?(S[ph]||[]):ph==='groups'?(S.gm||[]):ph==='ll'?(S.ll||[]):ph==='ko'&&S.ko?[...(S.ko.pre||[]),...S.ko.rounds.flat(),...(S.ko.third?[S.ko.third]:[])]:[];
+  const ready=m=>m.a&&m.b&&(m.sa===null||m.sa===undefined);
+  const running=cur.filter(m=>ready(m)&&m.t0);
+  const nT=Math.max(S.tables||2,...running.map(m=>m.tbl||0));
+  const byT={}; running.forEach(m=>{ byT[m.tbl||0]=byT[m.tbl||0]||m; });
+  const pl=m=>`<b>${esc(name(m.a))}</b> – <b>${esc(name(m.b))}</b>`;
+  const rows=[]; for(let i=1;i<=nT;i++){ const m=byT[i];
+    rows.push(`<li><span class="tn">${tr('Stół','Table')} ${i}</span>${m?`<span>${pl(m)} <small>${tr('od','since')} ${fmtClock(m.t0)}</small></span>`:`<span class="free">${tr('wolny','free')}</span>`}</li>`); }
+  const next=cur.filter(m=>ready(m)&&!m.t0).slice(0,Math.max(2,S.tables||2));
+  const last=liveMatches().filter(m=>m.a&&m.b&&m.sa!=null&&(m.fin||m.t1)).sort((x,y)=>Date.parse(y.fin||y.t1)-Date.parse(x.fin||x.t1)).slice(0,3);
+  const res=m=>{ const multi=T()>1; const s=(!multi&&m.pa!=null)?`${m.pa}:${m.pb}`:`${m.sa}:${m.sb}`; return `${esc(name(m.a))} <b>${s}</b> ${esc(name(m.b))}${m.tbl?` <small>(${tr('stół','table')} ${m.tbl})</small>`:''}`; };
+  const n1=running.length;
+  return `<details class="tboard" ${pf.open?'open':''} data-live><summary>🏓 ${tr('Stoły na żywo','Live tables')} <small>${n1?tr(`${n1} ${plural(n1,'mecz trwa','mecze trwają','meczów trwa')}`,`${n1} in play`):tr('żaden mecz nie trwa','nothing in play')}</small></summary>
+    <ul class="tables">${rows.join('')}</ul>
+    ${next.length?`<div class="lrow"><span class="lk">${tr('Następne','Up next')}</span><span>${next.map(pl).join(' · ')}</span></div>`:''}
+    ${last.length?`<div class="lrow"><span class="lk">${tr('Ostatnio','Just played')}</span><span>${last.map(res).join(' · ')}</span></div>`:''}
+    <div class="lrow"><button type="button" class="ghost small" id="livehide">${tr('Ukryj ten panel','Hide this panel')}</button></div></details>`;
+}
 function demoBar(){
   const canSim=['groups','ll','ko'].includes(S.phase)||isRoundPhase(S.phase);
   return `<section class="demo"><div>${tr('<b>Wersja demo.</b> Aplikacja działa w Twojej przeglądarce, a Ty jesteś organizatorem: możesz wpisywać wyniki, cofać rundy i zaczynać od nowa. Przykładowy turniej to prawdziwy przebieg rozgrywek firmowych ze zmienionymi imionami.','<b>Demo version.</b> The app runs in your browser and you are the organizer: you can enter results, roll back rounds and start over. The sample tournament is a real company tournament with changed names.')}</div>
@@ -680,24 +720,26 @@ function statsSec(){
     if(multi&&Array.isArray(m.sets)&&m.sets.length>1){ const fw=m.sets[0][0]>m.sets[0][1]?m.a:m.b; if(fw!==w){ comebacks++; mp(w).cb++; } }
   });
   const mps=Object.values(M);
-  const topM=(f,min=1)=>mps.filter(x=>x.n>=min).sort((a,b)=>f(b)-f(a)||b.w-a.w)[0];
-  const mostW=topM(x=>x.w), streak=topM(x=>x.best), setBal=multi?topM(x=>x.sw-x.sl):null, cbKing=multi&&comebacks?topM(x=>x.cb):null;
+  // a leader only counts when the value is reached by few players (not a shared tie) and is big enough to be interesting
+  const leader=(arr,f,minV)=>{ if(!arr.length) return null; const v=f(arr[0]); if(v<minV) return null; return arr.filter(x=>f(x)===v).length<=Math.max(1,Math.floor(arr.length/4))?arr[0]:null; };
+  const topM=(f,minV=1,min=1)=>leader(mps.filter(x=>x.n>=min).sort((a,b)=>f(b)-f(a)||b.w-a.w),f,minV);
+  const many=all.length>=6, mostW=topM(x=>x.w,2), streak=topM(x=>x.best,3), setBal=multi&&many?topM(x=>x.sw-x.sl,2):null, cbKing=multi&&comebacks&&many?topM(x=>x.cb,1):null;
   const R=S.ranking||[], idx={}; R.forEach((r,i)=>idx[r.id]=i);
   let up=null; all.forEach(([l,m])=>{ const w=winnerOf(m), lo=w===m.a?m.b:m.a; if(idx[w]==null||idx[lo]==null) return; const gap=idx[w]-idx[lo]; if(gap>0&&(!up||gap>up.gap)) up={gap,w,lo,l,m}; });
   const pointsTotal=seq.reduce((s,[,m])=>s+m.pa+m.pb,0);
   if(all.length>=3){
     cards.push(card(tr('Rozegrane mecze','Matches played'),all.length,'',seq.length?tr(`${pointsTotal} ${pts(pointsTotal)} w ${seq.length} ${unitN(seq.length)}, średnio ${(pointsTotal/seq.length).toFixed(1)} na ${multi?'set':'mecz'}`,`${pointsTotal} ${pts(pointsTotal)} in ${seq.length} ${unitN(seq.length)}, ${(pointsTotal/seq.length).toFixed(1)} per ${multi?'set':'match'} on average`):(multi?tr(`${all.reduce((s,[,m])=>s+m.sa+m.sb,0)} rozegranych setów`,`${all.reduce((s,[,m])=>s+m.sa+m.sb,0)} sets played`):'')));
-    cards.push(card(tr('Najwięcej zwycięstw','Most wins'),mostW.w,esc(name(mostW.id)),tr(`na ${mostW.n} ${plural(mostW.n,'mecz','mecze','meczów')}`,`from ${mostW.n} ${mostW.n===1?'match':'matches'}`),true));
-    cards.push(card(tr('Najdłuższa seria zwycięstw','Longest winning streak'),streak.best,esc(name(streak.id)),tr('meczów z rzędu','matches in a row')));
+    if(mostW) cards.push(card(tr('Najwięcej zwycięstw','Most wins'),mostW.w,esc(name(mostW.id)),tr(`na ${mostW.n} ${plural(mostW.n,'mecz','mecze','meczów')}`,`from ${mostW.n} ${mostW.n===1?'match':'matches'}`),true));
+    if(streak) cards.push(card(tr('Najdłuższa seria zwycięstw','Longest winning streak'),streak.best,esc(name(streak.id)),tr('meczów z rzędu','matches in a row')));
     if(multi){
-      cards.push(card(tr('Najlepszy bilans setów','Best set difference'),(setBal.sw-setBal.sl>0?'+':'')+(setBal.sw-setBal.sl),esc(name(setBal.id)),`${setBal.sw}:${setBal.sl} ${tr('w setach','in sets')}`,true));
-      cards.push(card(tr('Mecze na pełnym dystansie','Matches going the distance'),full,'',tr(`rozstrzygnięte dopiero w ostatnim, decydującym secie (${Math.round(100*full/all.length)}% meczów)`,`decided only in the final set (${Math.round(100*full/all.length)}% of matches)`)));
+      if(setBal) cards.push(card(tr('Najlepszy bilans setów','Best set difference'),(setBal.sw-setBal.sl>0?'+':'')+(setBal.sw-setBal.sl),esc(name(setBal.id)),`${setBal.sw}:${setBal.sl} ${tr('w setach','in sets')}`,true));
+      if(many&&full>0) cards.push(card(tr('Mecze na pełnym dystansie','Matches going the distance'),full,'',tr(`rozstrzygnięte dopiero w ostatnim, decydującym secie (${Math.round(100*full/all.length)}% meczów)`,`decided only in the final set (${Math.round(100*full/all.length)}% of matches)`)));
       if(cbKing&&cbKing.cb) cards.push(card(tr('Król powrotów','Comeback king'),cbKing.cb,esc(name(cbKing.id)),tr(`${cbKing.cb===1?'mecz wygrany':'meczów wygranych'} mimo przegranego 1. seta (łącznie ${comebacks} w turnieju)`,`${cbKing.cb===1?'match':'matches'} won after losing the 1st set (${comebacks} in the whole tournament)`)));
     }
-    if(up&&up.gap>=3) cards.push(card(tr('Największa niespodzianka','Biggest upset'),tr(`${up.gap} ${plural(up.gap,'miejsce','miejsca','miejsc')}`,`${up.gap} ${up.gap===1?'place':'places'}`),tr(`${esc(name(up.w))} pokonuje ${esc(name(up.lo))}`,`${esc(name(up.w))} beats ${esc(name(up.lo))}`),tr(`#${idx[up.w]+1} wygrywa z #${idx[up.lo]+1} · ${scoreStr(up.m)} · ${up.l}`,`#${idx[up.w]+1} beats #${idx[up.lo]+1} · ${scoreStr(up.m)} · ${up.l}`),true));
+    if(many&&up&&up.gap>=3) cards.push(card(tr('Największa niespodzianka','Biggest upset'),tr(`${up.gap} ${plural(up.gap,'miejsce','miejsca','miejsc')}`,`${up.gap} ${up.gap===1?'place':'places'}`),tr(`${esc(name(up.w))} pokonuje ${esc(name(up.lo))}`,`${esc(name(up.w))} beats ${esc(name(up.lo))}`),tr(`#${idx[up.w]+1} wygrywa z #${idx[up.lo]+1} · ${scoreStr(up.m)} · ${up.l}`,`#${idx[up.w]+1} beats #${idx[up.lo]+1} · ${scoreStr(up.m)} · ${up.l}`),true));
   }
   // ----- point level (when points were entered) -----
-  if(seq.length>=3){
+  if(seq.length>=6){
     const diff=m=>Math.abs(m.pa-m.pb), sum=m=>m.pa+m.pb, wp=m=>m.pa>m.pb?m.a:m.b;
     const txt=([l,m])=>{const w=wp(m),lo=w===m.a?m.b:m.a,hi=Math.max(m.pa,m.pb),lw=Math.min(m.pa,m.pb);return {w:`${esc(name(w))} – ${esc(name(lo))}`,d:`${hi}:${lw} · ${l}`};};
     const pick=(f,cmp)=>seq.reduce((b,x)=>b===null||cmp(f(x[1]),f(b[1]),x,b)?x:b,null);
@@ -710,31 +752,31 @@ function statsSec(){
     seq.forEach(([,m])=>{ const sides=m.half?[['a','b']]:[['a','b'],['b','a']];
       sides.forEach(([me])=>{const x=pl(m[me]); x.pf+=me==='a'?m.pa:m.pb; x.pa+=me==='a'?m.pb:m.pa; x.k++;}); });
     const ps=Object.values(P);
-    const top=(f,min=1)=>ps.filter(x=>x.k>=min).sort((a,b)=>f(b)-f(a))[0];
-    const mostPts=top(x=>x.pf), bestBal=top(x=>x.pf-x.pa), wall=top(x=>-x.pa/x.k,2);
+    const top=(f,minV,min=1)=>leader(ps.filter(x=>x.k>=min).sort((a,b)=>f(b)-f(a)),f,minV);
+    const mostPts=top(x=>x.pf,22,2), bestBal=top(x=>x.pf-x.pa,5,2), wall=top(x=>-x.pa/x.k,-9,3);
     const b=txt(blow), c=txt(close), lg=txt(longest);
     cards.push(card(multi?tr('Najwyższy set','Biggest set win'):tr('Najwyższe zwycięstwo','Biggest win'),b.d.split(' · ')[0],b.w,b.d.split(' · ').slice(1).join(' · '),true));
     cards.push(card(multi?tr('Najbardziej zacięty set','Closest set'):tr('Najbardziej zacięty mecz','Closest match'),c.d.split(' · ')[0],c.w,c.d.split(' · ').slice(1).join(' · ')));
     cards.push(card(multi?tr('Najdłuższy set (punkty)','Longest set (points)'):tr('Najdłuższy mecz (punkty)','Longest match (points)'),lg.d.split(' · ')[0],lg.w,`${sum(longest[1])} ${pts(sum(longest[1]))} · ${lg.d.split(' · ').slice(1).join(' · ')}`));
-    cards.push(card(tr('Najwięcej zdobytych punktów','Most points scored'),mostPts.pf,esc(name(mostPts.id)),tr(`w ${mostPts.k} ${multi?plural(mostPts.k,'secie','setach','setach'):plural(mostPts.k,'meczu','meczach','meczach')}`,`in ${mostPts.k} ${unitN(mostPts.k)}`)));
-    cards.push(card(tr('Najlepszy bilans punktów','Best point difference'),(bestBal.pf-bestBal.pa>0?'+':'')+(bestBal.pf-bestBal.pa),esc(name(bestBal.id)),`${bestBal.pf}:${bestBal.pa}`));
+    if(mostPts) cards.push(card(tr('Najwięcej zdobytych punktów','Most points scored'),mostPts.pf,esc(name(mostPts.id)),tr(`w ${mostPts.k} ${multi?plural(mostPts.k,'secie','setach','setach'):plural(mostPts.k,'meczu','meczach','meczach')}`,`in ${mostPts.k} ${unitN(mostPts.k)}`)));
+    if(bestBal) cards.push(card(tr('Najlepszy bilans punktów','Best point difference'),(bestBal.pf-bestBal.pa>0?'+':'')+(bestBal.pf-bestBal.pa),esc(name(bestBal.id)),`${bestBal.pf}:${bestBal.pa}`));
     if(wall) cards.push(card(tr('Najszczelniejsza obrona','Tightest defence'),(wall.pa/wall.k).toFixed(1),esc(name(wall.id)),tr(`traconych punktów na ${multi?'set':'mecz'}`,`points conceded per ${multi?'set':'match'}`)));
-    cards.push(card(tr('Gra na przewagi','Deuce games'),deuce,'',tr(`${multi?plural(deuce,'set skończył','sety skończyły','setów skończyło'):plural(deuce,'mecz skończył','mecze skończyły','meczów skończyło')} się po 10:10.`,`${unitN(deuce)} went past 10:10.`)+deuceNote));
+    if(deuce>0) cards.push(card(tr('Gra na przewagi','Deuce games'),deuce,'',tr(`${multi?plural(deuce,'set skończył','sety skończyły','setów skończyło'):plural(deuce,'mecz skończył','mecze skończyły','meczów skończyło')} się po 10:10.`,`${unitN(deuce)} went past 10:10.`)+deuceNote));
     if(tight) cards.push(card(multi?tr('Sety na styku','Tight sets'):tr('Mecze na styku','Tight finishes'),tight,'',tr(`wygrane różnicą dokładnie 2 punktów (${Math.round(100*tight/seq.length)}% ${multi?'setów':'meczów'})`,`won by exactly 2 points (${Math.round(100*tight/seq.length)}% of ${unitN(2)})`)));
     if(zeros) cards.push(card(tr('Do zera','Shutouts'),zeros,'',tr(`${multi?plural(zeros,'set','sety','setów'):plural(zeros,'mecz','mecze','meczów')} 11:0`,`${unitN(zeros)} won 11:0`)));
   }
-  if(timed.length){
+  if(timed.length>=3){
     const tot=timed.reduce((s,x)=>s+x[2],0);
     const lg=timed.reduce((b,x)=>x[2]>b[2]?x:b), sh=timed.reduce((b,x)=>x[2]<b[2]?x:b);
     const nm=([,m])=>{ const w=winnerOf(m); return `${esc(name(w))} – ${esc(name(w===m.a?m.b:m.a))}`; };
     const sc=([l,m])=>`${scoreStr(m)} · ${l}`;
     cards.push(card(tr('Średni czas meczu','Average match time'),fmtDur(tot/timed.length),'',tr(`z ${timed.length} ${plural(timed.length,'zmierzonego meczu','zmierzonych meczów','zmierzonych meczów')}`,`from ${timed.length} timed ${timed.length===1?'match':'matches'}`),true));
-    cards.push(card(tr('Najdłuższy mecz (czas)','Longest match (time)'),fmtDur(lg[2]),nm(lg),sc(lg)));
-    if(timed.length>1) cards.push(card(tr('Najkrótszy mecz (czas)','Shortest match (time)'),fmtDur(sh[2]),nm(sh),sc(sh)));
+    if(lg[2]-sh[2]>=60000) cards.push(card(tr('Najdłuższy mecz (czas)','Longest match (time)'),fmtDur(lg[2]),nm(lg),sc(lg)));
+    if(timed.length>=4&&lg[2]-sh[2]>=60000) cards.push(card(tr('Najkrótszy mecz (czas)','Shortest match (time)'),fmtDur(sh[2]),nm(sh),sc(sh)));
     cards.push(card(tr('Łącznie przy stole','Total time at the table'),fmtDur(tot),'',tr('suma czasu zmierzonych meczów','sum of the timed matches')));
   }
   if(!cards.length) return '';
-  return `<details class="how statsbox" data-stats ${statsOpen?'open':''}><summary>${tr('Statystyki turnieju','Tournament stats')}</summary><p class="sub" style="margin:0 0 12px">${tr('Liczone ze wszystkich rozegranych meczów, łącznie z Lucky Losers i drabinką.','Calculated from all matches played, including Lucky Losers and the bracket.')}${multi&&seq.length?tr(' Mecze do kilku setów: statystyki punktowe liczone z każdego seta osobno.',' Multi-set matches: point stats are calculated from every set separately.'):''}${timed.length?tr(' Czas meczu mierzymy od kliknięcia „Start meczu” do wpisania wyniku.',' Match time runs from tapping “Start match” to entering the result.'):''}</p><div class="stats">${cards.join('')}</div></details>`;
+  return `<details class="how statsbox" data-stats ${statsOpen?'open':''}><summary>${tr('Statystyki turnieju','Tournament stats')}</summary><p class="sub" style="margin:0 0 12px">${tr('Liczone ze wszystkich rozegranych meczów, łącznie z Lucky Losers i drabinką.','Calculated from all matches played, including Lucky Losers and the bracket.')}${multi&&seq.length?tr(' Mecze do kilku setów: statystyki punktowe liczone z każdego seta osobno.',' Multi-set matches: point stats are calculated from every set separately.'):''}${timed.length?tr(' Czas meczu mierzymy od kliknięcia „Start meczu” do wpisania wyniku.',' Match time runs from tapping “Start match” to entering the result.'):''}</p><div class="stats">${cards.join('')}</div>${all.length<20?`<p class="sub" style="margin:12px 0 0">${tr('Kolejne statystyki pojawią się w miarę rozgrywania turnieju, gdy będzie z czego je policzyć.','More stats will appear as the tournament goes on and there is enough data to compare.')}</p>`:''}</details>`;
 }
 
 function allResults(){
@@ -890,6 +932,7 @@ function adminPanel(){
   <form id="setf" class="grid2">
     <label class="f">${tr('Nazwa turnieju','Tournament name')}<input id="s_title" value="${esc(S.title)}" maxlength="120"></label>
     <label class="f">${tr('Mecz do wygranych setów','Sets to win a match')}<select id="s_sets" ${locked?'disabled':''}>${[1,2,3].map(v=>`<option value="${v}" ${v===T()?'selected':''}>${v}</option>`).join('')}</select></label>
+    <label class="f">${tr('Liczba stołów','Number of tables')}<select id="s_tables">${Array.from({length:16},(_,i)=>`<option value="${i+1}" ${(S.tables||2)===i+1?'selected':''}>${i+1}</option>`).join('')}</select></label>
     <label class="f">${tr('Wpisywanie wyników','Score entry')}<select id="s_mode"><option value="points" ${mode==='points'?'selected':''}>${T()===1?tr('Punkty seta','Set points'):tr('Punkty każdego seta','Points of every set')}</option><option value="sets" ${mode==='sets'?'selected':''}>${T()===1?tr('Tylko zwycięzca (szybciej)','Winner only (faster)'):tr('Tylko wynik w setach (szybciej)','Sets only (faster)')}</option></select></label>
     <label class="f">${tr('Format kwalifikacji','Qualification format')}<select id="s_fmt" ${locked?'disabled':''}><option value="rounds" ${fmt==='rounds'?'selected':''}>${tr('Losowe rundy','Random-opponent rounds')}</option><option value="groups" ${fmt==='groups'?'selected':''}>${tr('Grupy (każdy z każdym)','Groups (round-robin)')}</option></select></label>
     <label class="f fmt-rounds" ${fmt==='rounds'?'':'hidden'}>${tr('Liczba rund (tyle meczów zagra każdy)','Number of rounds (matches per player)')}<select id="s_rounds" ${locked?'disabled':''}>${[1,2,3,4,5,6].map(v=>`<option value="${v}" ${v===R?'selected':''}>${v}</option>`).join('')}</select></label>
@@ -934,6 +977,9 @@ function bind(){
   if(!bind.adm){ bind.adm=true; $('#infobtn').onclick=()=>{ const d=$('#howto'); if(!d) return; d.open=true; scrollTo(0,d.getBoundingClientRect().top+scrollY-70); }; $('#admopen').onclick=()=>$('#adm').showModal(); $('#admclose').onclick=()=>$('#adm').close(); $('#adm').addEventListener('click',e=>{ if(e.target===e.currentTarget) e.currentTarget.close(); }); }
   document.querySelectorAll('[data-tview]').forEach(b=>b.onclick=()=>{ tblView=b.dataset.tview; render(); });
   document.querySelectorAll('details[data-stats]').forEach(d=>d.addEventListener('toggle',()=>{ statsOpen=d.open; }));
+  document.querySelectorAll('details[data-live]').forEach(d=>d.addEventListener('toggle',()=>{ try{ LS.set('ttt_live',Object.assign(livePref(),{open:d.open})); }catch(e){} }));
+  const lh=$('#livehide'); if(lh) lh.onclick=()=>liveSet({show:false});
+  const ls=$('#liveshow'); if(ls) ls.onclick=()=>liveSet({show:true});
   document.querySelectorAll('[data-demo]').forEach(b=>b.onclick=()=>run(async()=>{
     const a=b.dataset.demo;
     if(a==='sim') return TTEngine.simulateStage();
@@ -978,7 +1024,7 @@ function bind(){
     $('#s_ll_n').addEventListener('change',()=>{ kobox.dataset.touched='1'; refreshKo(false); });
   }
   const sf=$('#setf'); if(sf) sf.addEventListener('submit',e=>{e.preventDefault();
-    const dlv=$('#s_dl').value; const body={action:'settings',title:$('#s_title').value,scoreMode:$('#s_mode').value};
+    const dlv=$('#s_dl').value; const body={action:'settings',title:$('#s_title').value,scoreMode:$('#s_mode').value,tables:+$('#s_tables').value};
     // format first, then sizes; bracket and Lucky Losers places are only sent once the organizer has picked them
     if(!$('#s_fmt').disabled){ body.format=$('#s_fmt').value; body.rounds=+$('#s_rounds').value; body.groupSize=+$('#s_gsize').value; body.groupAdvance=+$('#s_gadv').value; }
     // knockout stage: only sent when the organizer touched it, and it replaces any old explicit bracket size

@@ -31,7 +31,7 @@ def now():
 def new_state():
     return {"title": DEFAULT_TITLE, "edition": "Edycja 2026", "prize": "", "setsToWin": 1, "scoreMode": "points",
             "rounds": 2, "format": "rounds", "groupSize": 4, "groupAdvance": 2, "groups": [], "gm": [],
-            "koSize": None, "llSpots": None, "advancePct": None, "luckyLosers": False, "llMode": "playoff", "llTable": [], "deadline": None, "phase": "signup", "players": [],
+            "tables": 2, "koSize": None, "llSpots": None, "advancePct": None, "luckyLosers": False, "llMode": "playoff", "llTable": [], "deadline": None, "phase": "signup", "players": [],
             "r1": [], "r2": [], "r3": [], "r4": [], "r5": [], "r6": [], "ll": [], "llDirect": [], "sel": None, "ko": None, "rev": 0, "updated": now()}
 
 
@@ -455,6 +455,8 @@ def setp(m, a, b):
         m["sets"] = None
         m.pop("t0", None)
         m.pop("t1", None)
+        m.pop("fin", None)
+        m.pop("tbl", None)
 
 
 def set_side(m, side, pid):
@@ -463,6 +465,8 @@ def set_side(m, side, pid):
         m["sa"], m["sb"], m["pa"], m["pb"], m["sets"] = None, None, None, None, None
         m.pop("t0", None)
         m.pop("t1", None)
+        m.pop("fin", None)
+        m.pop("tbl", None)
 
 
 def propagate(s):
@@ -682,12 +686,30 @@ def set_score(s, stage, m_id, sa, sb, admin, pa=None, pb=None, sets=None):
     if clearing:
         m.pop("t0", None)
         m.pop("t1", None)
-    elif m.get("t0") and not m.get("t1"):
-        m["t1"] = now()
+        m.pop("fin", None)
+        m.pop("tbl", None)
+    else:
+        if m.get("t0") and not m.get("t1"):
+            m["t1"] = now()
+        m["fin"] = now()
     if stage in ("ko", "third", "pre"):
         propagate(s)
     else:
         advance(s)
+
+
+def all_matches(s):
+    out = list(s.get("gm") or []) + list(s.get("ll") or [])
+    for k in ROUND_KEYS:
+        out += list(s.get(k) or [])
+    ko = s.get("ko")
+    if ko:
+        out += list(ko.get("pre") or [])
+        for r in ko["rounds"]:
+            out += r
+        if ko.get("third"):
+            out.append(ko["third"])
+    return out
 
 
 def start_match(s, stage, m_id, cancel=False):
@@ -699,15 +721,27 @@ def start_match(s, stage, m_id, cancel=False):
     if m["sa"] is not None:
         raise Err("Ten mecz ma już wynik.")
     m.pop("t1", None)
+    m.pop("fin", None)
     if cancel:
         m.pop("t0", None)
+        m.pop("tbl", None)
     else:
+        used = {x.get("tbl") for x in all_matches(s) if x is not m and x.get("t0") and x["sa"] is None and x.get("tbl")}
+        k = 1
+        while k in used:
+            k += 1
         m["t0"] = now()
+        m["tbl"] = k
 
 
 def admin_action(s, body):
     act = body.get("action")
     if act == "settings":
+        if "tables" in body:
+            v = int(body["tables"])
+            if not 1 <= v <= 16:
+                raise Err("Liczba stołów musi mieścić się między 1 a 16.")
+            s["tables"] = v
         if "title" in body:
             t = str(body["title"]).strip()[:120]
             s["title"] = t or DEFAULT_TITLE
@@ -892,7 +926,7 @@ def admin_action(s, body):
     elif act == "reset":
         keep = body.get("keepPlayers")
         ns = new_state()
-        for k in ("title", "edition", "prize", "setsToWin", "scoreMode", "rounds", "format", "groupSize", "groupAdvance", "koSize", "llSpots", "advancePct", "luckyLosers", "llMode"):
+        for k in ("title", "edition", "prize", "setsToWin", "scoreMode", "rounds", "format", "groupSize", "groupAdvance", "koSize", "llSpots", "advancePct", "luckyLosers", "llMode", "tables"):
             ns[k] = s.get(k, ns[k])
         if keep:
             ns["players"] = s["players"]

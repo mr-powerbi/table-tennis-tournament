@@ -245,3 +245,35 @@ assert.equal(s.phase, 'done');
 assert.equal(s.players.length, 26);
 
 console.log(`OK: ${checked} full tournaments (3–40 players) and validation tests`);
+
+// ---- tables, table assignment and simulated match times ----
+{
+  store.clear();
+  E.freshWithPlayers(Array.from({ length: 8 }, (_, i) => 'P' + (i + 1)));
+  E.request('api/admin', { action: 'settings', tables: 3 });
+  assert.equal(E.request('api/state').tables, 3);
+  assert.throws(() => E.request('api/admin', { action: 'settings', tables: 0 }));
+  assert.throws(() => E.request('api/admin', { action: 'settings', tables: 17 }));
+  E.request('api/admin', { action: 'draw' });
+  const ms = E.request('api/state').r1;
+  const [m1, m2, m3] = ms;
+  for (const m of [m1, m2, m3]) E.request('api/start', { stage: 'r1', id: m.id });
+  let r1 = E.request('api/state').r1;
+  assert.deepEqual([m1, m2, m3].map((m) => r1.find((x) => x.id === m.id).tbl), [1, 2, 3]);
+  E.request('api/score', { stage: 'r1', id: m2.id, pa: 11, pb: 5 });
+  E.request('api/start', { stage: 'r1', id: ms[3].id });
+  r1 = E.request('api/state').r1;
+  assert.equal(r1.find((x) => x.id === ms[3].id).tbl, 2, 'the freed table is reused');
+  assert.ok(r1.find((x) => x.id === m2.id).fin, 'finish time recorded');
+}
+{
+  store.clear();
+  E.freshWithPlayers(Array.from({ length: 16 }, (_, i) => 'P' + (i + 1)));
+  E.request('api/admin', { action: 'draw' });
+  E.simulateStage();
+  const s = E.request('api/state');
+  const durs = s.r1.map((m) => Date.parse(m.t1) - Date.parse(m.t0)).map((d) => d / 60000);
+  const avg = durs.reduce((a, b) => a + b, 0) / durs.length;
+  assert.ok(avg > 3 && avg < 7, 'simulated matches last about 5 minutes, got ' + avg);
+  assert.ok(Date.parse(s.r1[s.r1.length - 1].fin) <= Date.now() + 1000, 'no times in the future');
+}
